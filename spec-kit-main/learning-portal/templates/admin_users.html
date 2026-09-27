@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Пользователи · Проверка знаний{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>Пользователи</h1><p>Управляйте учётными записями преподавателей и студентов.</p></div><a class="button" href="{{ url_for('admin_user_new') }}">Добавить пользователя</a></div>
+<section class="card table-wrap">
+  <table>
+    <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th></th></tr></thead>
+    <tbody>
+      {% for user in users %}
+      <tr><td>{{ user['full_name'] }}</td><td>{{ user['username'] }}</td><td>{{ roles[user['role']] }}</td><td class="actions"><a href="{{ url_for('admin_user_edit', user_id=user['id']) }}">Изменить</a>{% if user['id'] != g.user['id'] %}<form method="post" action="{{ url_for('admin_user_delete', user_id=user['id']) }}"><button class="danger link-button">Удалить</button></form>{% endif %}</td></tr>
+      {% else %}<tr><td colspan="4">Учётных записей пока нет.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

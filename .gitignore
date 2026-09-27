@@ -1,0 +1,48 @@
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Frontend dependencies and builds
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Local model artifacts
+backend/artifacts/*
+!backend/artifacts/.gitkeep
+*.cbm
+*.joblib
+*.pkl
+
+# Private source datasets and unrelated nested repository
+data/
+BancFraud/
+
+# Temporary analysis data
+bank-fraud-local-sessions/
+backend/tests/.tmp/
+backend/.pytest-tmp/
+*.sqlite
+*.sqlite3
+*.db
+
+# Local configuration, secrets and logs
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.log
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

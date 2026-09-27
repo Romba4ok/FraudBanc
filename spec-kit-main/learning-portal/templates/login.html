@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Вход · Проверка знаний{% endblock %}
+{% block content %}
+<section class="card login-card">
+  <h1>Вход</h1>
+  <form method="post" class="form-stack">
+    <label>Логин<input name="username" autocomplete="username" required></label>
+    <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
+    <button>Войти</button>
+  </form>
+</section>
+{% endblock %}

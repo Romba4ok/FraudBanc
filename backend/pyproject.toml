@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bank-fraud-local"
+version = "0.1.0"
+description = "Local first-party fraud analysis service"
+requires-python = ">=3.11"
+dependencies = [
+  "catboost>=1.2,<2",
+  "fastapi>=0.115,<1",
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<4",
+  "python-multipart>=0.0.20,<1",
+  "scikit-learn>=1.4,<2",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+test = ["httpx>=0.28,<1", "pytest>=8,<10"]
+
+[project.scripts]
+bank-fraud-train = "app.training.train:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "--strict-markers"

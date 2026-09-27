@@ -1,0 +1,3 @@
+{% extends 'base.html' %}
+{% block title %}Новая группа · Проверка знаний{% endblock %}
+{% block content %}<section class="card form-card"><h1>Новая группа</h1><form method="post" class="form-stack"><label>Название группы<input name="title" value="{{ request.form.get('title', '') }}" placeholder="Например, 9А · Алгебра" required></label><div class="actions"><button>Создать</button><a href="{{ url_for('teacher_groups') }}">Отмена</a></div></form></section>{% endblock %}

@@ -16,15 +16,21 @@ class CsvFormatError(ValueError):
 class CsvMetadata:
     delimiter: str
     columns: list[str]
+    encoding: str = "utf-8-sig"
 
 
 def normalize_header(value: object) -> str:
     return str(value).strip()
 
 
-def _read_sample(path: Path, size: int = 64 * 1024) -> str:
-    with path.open("r", encoding="utf-8-sig", errors="strict", newline="") as stream:
-        return stream.read(size)
+def _read_sample(path: Path, size: int = 64 * 1024) -> tuple[str, str]:
+    raw = path.read_bytes()[:size]
+    for encoding in ("utf-8-sig", "cp1251"):
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeError("CSV encoding must be UTF-8 or Windows-1251.")
 
 
 def detect_delimiter(sample: str) -> str:
@@ -45,7 +51,7 @@ def detect_delimiter(sample: str) -> str:
 
 def inspect_csv(path: str | Path) -> CsvMetadata:
     csv_path = Path(path)
-    sample = _read_sample(csv_path)
+    sample, encoding = _read_sample(csv_path)
     delimiter = detect_delimiter(sample)
     first_line = sample.splitlines()[0]
     raw_columns = next(csv.reader([first_line], delimiter=delimiter))
@@ -57,7 +63,7 @@ def inspect_csv(path: str | Path) -> CsvMetadata:
     duplicates = sorted({column for column in columns if columns.count(column) > 1})
     if duplicates:
         raise CsvFormatError(f"CSV contains duplicate columns: {', '.join(duplicates)}")
-    return CsvMetadata(delimiter=delimiter, columns=columns)
+    return CsvMetadata(delimiter=delimiter, columns=columns, encoding=encoding)
 
 
 def read_csv(path: str | Path, *, nrows: int | None = None) -> tuple[pd.DataFrame, CsvMetadata]:
@@ -67,7 +73,7 @@ def read_csv(path: str | Path, *, nrows: int | None = None) -> tuple[pd.DataFram
         csv_path,
         sep=metadata.delimiter,
         dtype="string",
-        encoding="utf-8-sig",
+        encoding=metadata.encoding,
         keep_default_na=False,
         nrows=nrows,
         low_memory=False,
@@ -83,7 +89,7 @@ def iter_csv_chunks(path: str | Path, *, chunksize: int) -> Iterator[pd.DataFram
         csv_path,
         sep=metadata.delimiter,
         dtype="string",
-        encoding="utf-8-sig",
+        encoding=metadata.encoding,
         keep_default_na=False,
         chunksize=chunksize,
         low_memory=False,

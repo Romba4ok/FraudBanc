@@ -60,7 +60,7 @@ function renderPage() {
 }
 
 describe("RiskRecordsPage", () => {
-  it("shows distributions and opens a focused four-tab record card", async () => {
+  it("shows distributions and opens a focused record card", async () => {
     const user = userEvent.setup();
     renderPage();
     expect(screen.getByRole("img", { name: /0–10%: 1/ })).toBeInTheDocument();
@@ -70,22 +70,26 @@ describe("RiskRecordsPage", () => {
     const card = screen.getByRole("complementary", { name: "row-critical" });
     expect(card).toBeInTheDocument();
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
-      "Сводка", "Факторы риска", "Исходные данные", "Предупреждения1",
+      "Сводка", "Факторы риска", "Связанные операции", "Исходные данные", "Предупреждения1",
     ]);
     expect(screen.getByRole("tab", { name: "Сводка" })).toHaveAttribute("aria-selected", "true");
     expect(within(card).getByRole("progressbar", { name: "Риск 94.0%" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Факторы риска" }));
-    expect(screen.getAllByText("Количество событий за 6 месяцев")).toHaveLength(2);
-    expect(screen.getByText("CNT_6M")).toBeInTheDocument();
+    expect(screen.getAllByText("Запросы за 6 месяцев")).toHaveLength(2);
+    expect(screen.queryByText("CNT_6M")).not.toBeInTheDocument();
+    expect(screen.getByText("12 запросов за последние 6 мес.")).toBeInTheDocument();
+    expect(screen.getByText(/Количество запросов по субъекту/)).toBeInTheDocument();
     expect(screen.getByText("Повышает риск")).toBeInTheDocument();
     expect(screen.getByText("+0,8")).toBeInTheDocument();
 
     const factorsTab = screen.getByRole("tab", { name: "Факторы риска" });
     factorsTab.focus();
     await user.keyboard("{ArrowRight}");
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Связанные операции" })).toHaveFocus());
+    await user.keyboard("{ArrowRight}");
     await waitFor(() => expect(screen.getByRole("tab", { name: "Исходные данные" })).toHaveFocus());
-    expect(screen.getByText("Характер занятости")).toBeInTheDocument();
+    expect(screen.getByText("Вид деятельности")).toBeInTheDocument();
     expect(screen.getByText("Техническое поле")).toBeInTheDocument();
     expect(screen.getByText("NEW_SIGNAL")).toBeInTheDocument();
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import shutil
 import sqlite3
 import time
@@ -14,6 +15,7 @@ from typing import Any
 
 from app.core.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SESSION_TTL_SECONDS
 from app.domain.models import AnalysisMetrics, ProbabilityBin, ResultPage, RiskDistribution
+from app.services.export_service import safe_csv_cell
 
 
 RISK_LEVELS = frozenset({"low", "medium", "high", "critical"})
@@ -30,6 +32,32 @@ class SessionStore:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.ttl_seconds = int(ttl_seconds)
+        self._initialize_feedback_store()
+
+    @property
+    def _feedback_database(self) -> Path:
+        return self.root / "confirmed-feedback.sqlite3"
+
+    def _initialize_feedback_store(self) -> None:
+        with self._connect(self._feedback_database) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS confirmed_labels (
+                    analysis_id TEXT NOT NULL,
+                    entity_key TEXT NOT NULL,
+                    human_label INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    profile TEXT,
+                    model_version TEXT,
+                    risk_probability REAL,
+                    confirmed_at REAL NOT NULL,
+                    PRIMARY KEY(analysis_id, entity_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_confirmed_labels_time
+                    ON confirmed_labels(confirmed_at DESC);
+                """
+            )
+            connection.commit()
 
     def _session_dir(self, session_id: str) -> Path:
         try:
@@ -99,6 +127,58 @@ class SessionStore:
                     ON results(risk_probability DESC, row_position ASC);
                 CREATE INDEX idx_results_level_risk
                     ON results(risk_level, risk_probability DESC, row_position ASC);
+                CREATE TABLE entity_results (
+                    profile TEXT NOT NULL,
+                    row_position INTEGER NOT NULL,
+                    record_id TEXT NOT NULL,
+                    risk_probability REAL NOT NULL,
+                    risk_level TEXT NOT NULL,
+                    requires_review INTEGER NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    PRIMARY KEY(profile, row_position)
+                );
+                CREATE INDEX idx_entity_results_risk
+                    ON entity_results(profile, risk_probability DESC, row_position ASC);
+                CREATE INDEX idx_entity_results_review
+                    ON entity_results(profile, requires_review, risk_probability DESC);
+                CREATE TABLE relationships (
+                    row_position INTEGER PRIMARY KEY,
+                    relationship_id TEXT NOT NULL UNIQUE,
+                    kind TEXT NOT NULL,
+                    from_id TEXT NOT NULL,
+                    to_id TEXT NOT NULL,
+                    risk_probability REAL NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE INDEX idx_relationships_risk
+                    ON relationships(risk_probability DESC, row_position ASC);
+                CREATE INDEX idx_relationships_kind
+                    ON relationships(kind, risk_probability DESC, row_position ASC);
+                CREATE TABLE investigation_feedback (
+                    entity_key TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    comment TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE TABLE investigation_audit (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_key TEXT NOT NULL,
+                    previous_status TEXT,
+                    status TEXT NOT NULL,
+                    comment TEXT NOT NULL,
+                    occurred_at REAL NOT NULL
+                );
+                CREATE INDEX idx_investigation_audit_entity
+                    ON investigation_audit(entity_key, event_id DESC);
+                CREATE TABLE confirmed_feedback_labels (
+                    entity_key TEXT PRIMARY KEY,
+                    human_label INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    profile TEXT,
+                    model_version TEXT,
+                    risk_probability REAL,
+                    confirmed_at REAL NOT NULL
+                );
                 """
             )
             metadata = {
@@ -140,6 +220,386 @@ class SessionStore:
             )
             connection.commit()
         return session_id
+
+    def create_universal_session(
+        self,
+        *,
+        session_id: str,
+        client_records: Iterable[dict[str, Any]],
+        transaction_records: Iterable[dict[str, Any]],
+        relationships: Iterable[dict[str, Any]],
+        result: dict[str, Any],
+        inventory: dict[str, Any],
+        mapping: dict[str, Any],
+        plan: dict[str, Any],
+        threshold: float = 0.5,
+    ) -> str:
+        clients = [self._json_safe(dict(item)) for item in client_records]
+        transactions = [self._json_safe(dict(item)) for item in transaction_records]
+        links = [self._json_safe(dict(item)) for item in relationships]
+        legacy_rows = clients or transactions
+        self.create_session(
+            legacy_rows,
+            threshold=threshold,
+            model_version="universal-1.0",
+            session_id=session_id,
+            summary={
+                "rows": len(legacy_rows),
+                "requires_review": sum(bool(item.get("requires_review")) for item in legacy_rows),
+                "client_records": len(clients),
+                "transaction_records": len(transactions),
+                "relationships": len(links),
+            },
+        )
+        database = self._database_path(session_id)
+        with self._connect(database) as connection:
+            for profile, records in (("client_risk", clients), ("transaction_anomaly", transactions)):
+                prepared = []
+                for position, item in enumerate(records):
+                    probability = float(item.get("risk_probability", 0.0))
+                    level = str(item.get("risk_level", "low"))
+                    prepared.append((
+                        profile,
+                        position,
+                        str(item.get("record_id", item.get("transaction_id", f"row-{position + 1}"))),
+                        probability,
+                        level,
+                        int(bool(item.get("requires_review"))),
+                        json.dumps(item, ensure_ascii=False, allow_nan=False),
+                    ))
+                connection.executemany(
+                    "INSERT INTO entity_results(profile,row_position,record_id,risk_probability,risk_level,requires_review,payload_json) VALUES (?,?,?,?,?,?,?)",
+                    prepared,
+                )
+            connection.executemany(
+                "INSERT INTO relationships(row_position,relationship_id,kind,from_id,to_id,risk_probability,payload_json) VALUES (?,?,?,?,?,?,?)",
+                [
+                    (
+                        position,
+                        str(item["relationship_id"]),
+                        str(item["kind"]),
+                        str(item["from_id"]),
+                        str(item["to_id"]),
+                        float(item.get("risk_signal_score", 0.0)),
+                        json.dumps(item, ensure_ascii=False, allow_nan=False),
+                    )
+                    for position, item in enumerate(links)
+                ],
+            )
+            for key, value in {
+                "universal_result": result,
+                "inventory": inventory,
+                "mapping": mapping,
+                "plan": plan,
+            }.items():
+                connection.execute(
+                    "INSERT OR REPLACE INTO session_metadata(key,value) VALUES (?,?)",
+                    (key, json.dumps(self._json_safe(value), ensure_ascii=False, allow_nan=False)),
+                )
+            connection.commit()
+        return session_id
+
+    @classmethod
+    def _json_safe(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(key): cls._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._json_safe(item) for item in value]
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if hasattr(value, "item"):
+            return cls._json_safe(value.item())
+        if hasattr(value, "isoformat") and not isinstance(value, str):
+            return value.isoformat()
+        return value
+
+    def get_entity_page(
+        self,
+        session_id: str,
+        *,
+        profile: str,
+        page: int = 1,
+        page_size: int = 50,
+        risk_level: str | None = None,
+        requires_review: bool | None = None,
+        probability_min: float | None = None,
+        probability_max: float | None = None,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        if page < 1 or not 1 <= page_size <= MAX_PAGE_SIZE:
+            raise ValueError("Invalid pagination.")
+        if risk_level is not None and risk_level not in RISK_LEVELS:
+            raise ValueError("Unknown risk level filter.")
+        if probability_min is not None and not 0 <= probability_min <= 1:
+            raise ValueError("probability_min must be between 0 and 1.")
+        if probability_max is not None and not 0 <= probability_max <= 1:
+            raise ValueError("probability_max must be between 0 and 1.")
+        if probability_min is not None and probability_max is not None and probability_min > probability_max:
+            raise ValueError("probability_min must not exceed probability_max.")
+        conditions = ["profile = ?"]
+        parameters: list[Any] = [profile]
+        if risk_level is not None:
+            conditions.append("risk_level = ?")
+            parameters.append(risk_level)
+        if requires_review is not None:
+            conditions.append("requires_review = ?")
+            parameters.append(int(requires_review))
+        if probability_min is not None:
+            conditions.append("risk_probability >= ?")
+            parameters.append(probability_min)
+        if probability_max is not None:
+            conditions.append("risk_probability <= ?")
+            parameters.append(probability_max)
+        if (search or "").strip():
+            escaped = self._escape_like(search.strip())
+            conditions.append("LOWER(record_id) LIKE LOWER(?) ESCAPE '\\'")
+            parameters.append(f"%{escaped}%")
+        where = " WHERE " + " AND ".join(conditions)
+        with self._connect(self._database_path(session_id)) as connection:
+            total = int(connection.execute(
+                "SELECT COUNT(*) AS total FROM entity_results" + where, parameters
+            ).fetchone()["total"])
+            rows = connection.execute(
+                "SELECT payload_json FROM entity_results" + where
+                + " ORDER BY risk_probability DESC, row_position ASC LIMIT ? OFFSET ?",
+                [*parameters, page_size, (page - 1) * page_size],
+            ).fetchall()
+        return {
+            "items": [json.loads(row["payload_json"]) for row in rows],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def get_relationship_page(
+        self,
+        session_id: str,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        kind: str | None = None,
+        entity_id: str | None = None,
+        probability_min: float | None = None,
+    ) -> dict[str, Any]:
+        if page < 1 or not 1 <= page_size <= MAX_PAGE_SIZE:
+            raise ValueError("Invalid pagination.")
+        if probability_min is not None and not 0 <= probability_min <= 1:
+            raise ValueError("probability_min must be between 0 and 1.")
+        conditions: list[str] = []
+        parameters: list[Any] = []
+        if (kind or "").strip():
+            conditions.append("kind = ?")
+            parameters.append(kind.strip())
+        if (entity_id or "").strip():
+            conditions.append("(from_id = ? OR to_id = ?)")
+            parameters.extend([entity_id.strip(), entity_id.strip()])
+        if probability_min is not None:
+            conditions.append("risk_probability >= ?")
+            parameters.append(probability_min)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        with self._connect(self._database_path(session_id)) as connection:
+            total = int(connection.execute(
+                "SELECT COUNT(*) AS total FROM relationships" + where, parameters
+            ).fetchone()["total"])
+            rows = connection.execute(
+                "SELECT payload_json FROM relationships" + where
+                + " ORDER BY risk_probability DESC, row_position ASC LIMIT ? OFFSET ?",
+                [*parameters, page_size, (page - 1) * page_size],
+            ).fetchall()
+        return {"items": [json.loads(row["payload_json"]) for row in rows], "total": total, "page": page, "page_size": page_size}
+
+    @staticmethod
+    def _feedback_digest(entity_key: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(entity_key.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _ensure_investigation_schema(connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS investigation_feedback (
+                entity_key TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                comment TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS investigation_audit (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_key TEXT NOT NULL,
+                previous_status TEXT,
+                status TEXT NOT NULL,
+                comment TEXT NOT NULL,
+                occurred_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_investigation_audit_entity
+                ON investigation_audit(entity_key, event_id DESC);
+            CREATE TABLE IF NOT EXISTS confirmed_feedback_labels (
+                entity_key TEXT PRIMARY KEY,
+                human_label INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                profile TEXT,
+                model_version TEXT,
+                risk_probability REAL,
+                confirmed_at REAL NOT NULL
+            );
+            """
+        )
+
+    def save_feedback(self, session_id: str, entity_key: str, status: str, comment: str) -> dict[str, Any]:
+        if status not in {"new", "in_review", "confirmed", "dismissed"}:
+            raise ValueError("Unknown investigation status.")
+        normalized_key = entity_key.strip()
+        if not normalized_key:
+            raise ValueError("entity_key must not be empty.")
+
+        digest = self._feedback_digest(normalized_key)
+        updated_at = time.time()
+        with self._connect(self._database_path(session_id)) as connection:
+            self._ensure_investigation_schema(connection)
+            previous = connection.execute(
+                "SELECT status FROM investigation_feedback WHERE entity_key = ?", (digest,)
+            ).fetchone()
+            connection.execute(
+                "INSERT OR REPLACE INTO investigation_feedback(entity_key,status,comment,updated_at) VALUES (?,?,?,?)",
+                (digest, status, comment, updated_at),
+            )
+            connection.execute(
+                "INSERT INTO investigation_audit(entity_key,previous_status,status,comment,occurred_at) VALUES (?,?,?,?,?)",
+                (digest, None if previous is None else previous["status"], status, comment, updated_at),
+            )
+            if status in {"confirmed", "dismissed"}:
+                entity = connection.execute(
+                    "SELECT profile,risk_probability FROM entity_results WHERE record_id = ? LIMIT 1",
+                    (normalized_key,),
+                ).fetchone()
+                metadata = connection.execute(
+                    "SELECT value FROM session_metadata WHERE key = 'model_version'"
+                ).fetchone()
+                model_version = json.loads(metadata["value"]) if metadata else None
+                connection.execute(
+                    """INSERT OR REPLACE INTO confirmed_feedback_labels(
+                        entity_key,human_label,source,profile,model_version,risk_probability,confirmed_at
+                    ) VALUES (?,?,?,?,?,?,?)""",
+                    (
+                        digest,
+                        1 if status == "confirmed" else 0,
+                        "human_confirmed",
+                        None if entity is None else entity["profile"],
+                        model_version,
+                        None if entity is None else entity["risk_probability"],
+                        updated_at,
+                    ),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM confirmed_feedback_labels WHERE entity_key = ?", (digest,)
+                )
+            connection.commit()
+        if status in {"confirmed", "dismissed"}:
+            label = self.get_feedback(session_id, normalized_key)["confirmed_label"]
+            with self._connect(self._feedback_database) as feedback_connection:
+                feedback_connection.execute(
+                    """INSERT OR REPLACE INTO confirmed_labels(
+                        analysis_id,entity_key,human_label,source,profile,model_version,
+                        risk_probability,confirmed_at
+                    ) VALUES (?,?,?,?,?,?,?,?)""",
+                    (
+                        session_id,
+                        digest,
+                        label["human_label"],
+                        label["source"],
+                        label["profile"],
+                        label["model_version"],
+                        label["risk_probability"],
+                        label["confirmed_at"],
+                    ),
+                )
+                feedback_connection.commit()
+        else:
+            with self._connect(self._feedback_database) as feedback_connection:
+                feedback_connection.execute(
+                    "DELETE FROM confirmed_labels WHERE analysis_id = ? AND entity_key = ?",
+                    (session_id, digest),
+                )
+                feedback_connection.commit()
+        return self.get_feedback(session_id, normalized_key)
+
+    def get_feedback(self, session_id: str, entity_key: str) -> dict[str, Any]:
+        digest = self._feedback_digest(entity_key.strip())
+        with self._connect(self._database_path(session_id)) as connection:
+            self._ensure_investigation_schema(connection)
+            current = connection.execute(
+                "SELECT status,comment,updated_at FROM investigation_feedback WHERE entity_key = ?",
+                (digest,),
+            ).fetchone()
+            history = connection.execute(
+                """SELECT event_id,previous_status,status,comment,occurred_at
+                FROM investigation_audit WHERE entity_key = ? ORDER BY event_id DESC""",
+                (digest,),
+            ).fetchall()
+            label = connection.execute(
+                """SELECT human_label,source,profile,model_version,risk_probability,confirmed_at
+                FROM confirmed_feedback_labels WHERE entity_key = ?""",
+                (digest,),
+            ).fetchone()
+        return {
+            "status": "new" if current is None else current["status"],
+            "comment": "" if current is None else current["comment"],
+            "updated_at": None if current is None else current["updated_at"],
+            "confirmed_label": None if label is None else dict(label),
+            "history": [dict(item) for item in history],
+        }
+
+    def feedback_summary(self, session_id: str) -> dict[str, Any]:
+        with self._connect(self._database_path(session_id)) as connection:
+            self._ensure_investigation_schema(connection)
+            statuses = {row["status"]: row["count"] for row in connection.execute(
+                "SELECT status,COUNT(*) AS count FROM investigation_feedback GROUP BY status"
+            )}
+            labels = [dict(row) for row in connection.execute(
+                """SELECT entity_key,human_label,source,profile,model_version,risk_probability,confirmed_at
+                FROM confirmed_feedback_labels ORDER BY confirmed_at DESC"""
+            )]
+        return {"statuses": statuses, "confirmed_labels": labels, "total_confirmed": len(labels)}
+
+    def confirmed_feedback_labels(self) -> list[dict[str, Any]]:
+        """Return only anonymized, explicitly human-confirmed labels for future training."""
+        with self._connect(self._feedback_database) as connection:
+            return [dict(row) for row in connection.execute(
+                """SELECT analysis_id,entity_key,human_label,source,profile,model_version,
+                risk_probability,confirmed_at FROM confirmed_labels ORDER BY confirmed_at ASC"""
+            )]
+
+    def iter_entity_payloads(self, session_id: str, profile: str | None = None, review_only: bool = False) -> Iterator[dict[str, Any]]:
+        conditions: list[str] = []
+        parameters: list[Any] = []
+        if profile is not None:
+            conditions.append("profile = ?")
+            parameters.append(profile)
+        if review_only:
+            conditions.append("requires_review = 1")
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        with self._connect(self._database_path(session_id)) as connection:
+            for row in connection.execute(
+                "SELECT profile,payload_json FROM entity_results" + where
+                + " ORDER BY risk_probability DESC, profile ASC, row_position ASC",
+                parameters,
+            ):
+                item = json.loads(row["payload_json"])
+                item["profile"] = row["profile"]
+                yield item
+
+    def iter_relationship_payloads(self, session_id: str) -> Iterator[dict[str, Any]]:
+        with self._connect(self._database_path(session_id)) as connection:
+            for row in connection.execute(
+                "SELECT payload_json FROM relationships ORDER BY risk_probability DESC, row_position ASC"
+            ):
+                yield json.loads(row["payload_json"])
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     def metric_inputs(
         self,
@@ -375,7 +835,9 @@ class SessionStore:
                     )
                     for key, value in item.items()
                 }
-                writer.writerow(serialized)
+                writer.writerow(
+                    {key: safe_csv_cell(value) for key, value in serialized.items()}
+                )
                 yield buffer.getvalue()
                 buffer.seek(0)
                 buffer.truncate(0)

@@ -1,14 +1,16 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import type { AnalysisRow } from "../types/analysis";
+import type { AnalysisRow, TransactionRow } from "../types/analysis";
 import { formatDataWarning, formatFeatureValue, getFeaturePresentation, getRiskLevelLabel } from "../utils/labels";
 import { FactorCard } from "./FactorCard";
+import { InvestigationPanel } from "./InvestigationPanel";
 
-type DetailsTab = "summary" | "factors" | "source" | "warnings";
+type DetailsTab = "summary" | "factors" | "related" | "source" | "warnings";
 
 const tabs: Array<{ id: DetailsTab; label: string }> = [
   { id: "summary", label: "Сводка" },
   { id: "factors", label: "Факторы риска" },
+  { id: "related", label: "Связанные операции" },
   { id: "source", label: "Исходные данные" },
   { id: "warnings", label: "Предупреждения" },
 ];
@@ -25,7 +27,7 @@ function sourceValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function RecordDetails({ row, onClose }: { row: AnalysisRow; onClose: () => void }) {
+export function RecordDetails({ row, analysisId, relatedTransactions = [], onClose }: { row: AnalysisRow; analysisId?: string; relatedTransactions?: TransactionRow[]; onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<DetailsTab>("summary");
   const [copied, setCopied] = useState(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -120,8 +122,15 @@ export function RecordDetails({ row, onClose }: { row: AnalysisRow; onClose: () 
 
         {activeTab === "factors" && (
           <div className="record-factors">
-            <p>Факторы расположены в порядке, полученном от модели. Направление и числовой вклад показаны отдельно.</p>
+            <p>Факторы расположены по силе влияния. Красная отметка повышает риск, синяя — снижает.</p>
             {row.explanation_factors.length ? <ul className="factor-list">{row.explanation_factors.slice(0, 5).map((factor) => <FactorCard factor={factor} key={factor.feature} />)}</ul> : <p className="record-details__empty">Объяснение факторов для записи недоступно.</p>}
+          </div>
+        )}
+
+        {activeTab === "related" && (
+          <div className="record-related">
+            <p>Операции, которые модель связала с этим клиентом.</p>
+            {relatedTransactions.length ? <ul>{relatedTransactions.slice(0, 8).map((transaction) => <li key={transaction.record_id}><span><strong>{transaction.transaction_id ?? transaction.record_id}</strong><small>{transaction.transaction_timestamp ?? "Время не определено"}</small></span><strong>{(transaction.risk_probability * 100).toFixed(1)}%</strong></li>)}</ul> : <p className="record-details__empty">Связанные операции в этой выборке не найдены.</p>}
           </div>
         )}
 
@@ -137,6 +146,7 @@ export function RecordDetails({ row, onClose }: { row: AnalysisRow; onClose: () 
           </div>
         )}
       </div>
+      {analysisId && <InvestigationPanel analysisId={analysisId} entityId={row.record_id} />}
     </aside>
   );
 }

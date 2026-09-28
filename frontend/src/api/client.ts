@@ -1,5 +1,7 @@
 import type {
   AnalysisStatus,
+  AnalysisPlan,
+  SourceInventory,
   AnalysisSummary,
   AnalysisResultsQuery,
   ApiErrorPayload,
@@ -9,6 +11,14 @@ import type {
   ResultPage,
   RiskDistribution,
   ReportDownload,
+  AnalysisRow,
+  TransactionRow,
+  RelationshipRow,
+  UniversalPage,
+  UniversalResultsQuery,
+  InvestigationDetails,
+  InvestigationStatus,
+  UniversalExportKind,
 } from "../types/analysis";
 
 const API_BASE = "/api";
@@ -55,7 +65,7 @@ function query(params: Record<string, string | number | undefined>): string {
 export async function createAnalysis(file: File): Promise<CreateAnalysisResponse> {
   const body = new FormData();
   body.append("file", file);
-  return request<CreateAnalysisResponse>("/analyses", { method: "POST", body });
+  return request<CreateAnalysisResponse>("/analyses?auto_run=false", { method: "POST", body });
 }
 
 export function getHealthStatus(): Promise<HealthStatus> {
@@ -70,13 +80,67 @@ export function getAnalysisStatus(analysisId: string): Promise<AnalysisStatus> {
   return request<AnalysisStatus>(`/analyses/${analysisId}/status`);
 }
 
-export function getAnalysisSummary(
+export function getAnalysisInventory(analysisId: string): Promise<SourceInventory> {
+  return request<SourceInventory>(`/analyses/${analysisId}/inventory`);
+}
+
+export function getAnalysisPlan(analysisId: string): Promise<AnalysisPlan> {
+  return request<AnalysisPlan>(`/analyses/${analysisId}/plan`);
+}
+
+export function updateAnalysisPeriod(
+  analysisId: string,
+  period: { start: string | null; end: string | null },
+): Promise<AnalysisPlan> {
+  return request<AnalysisPlan>(`/analyses/${analysisId}/plan`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(period),
+  });
+}
+
+export function runAnalysis(analysisId: string): Promise<{ analysis_id: string; status: "queued" }> {
+  return request(`/analyses/${analysisId}/run`, { method: "POST" });
+}
+
+export function cancelAnalysis(
+  analysisId: string,
+): Promise<{ analysis_id: string; status: "cancel_requested" | "cancelled" }> {
+  return request(`/analyses/${analysisId}/cancel`, { method: "POST" });
+}
+
+export async function getAnalysisSummary(
   analysisId: string,
   threshold?: number,
 ): Promise<AnalysisSummary> {
-  return request<AnalysisSummary>(
+  const payload = await request<AnalysisSummary>(
     `/analyses/${analysisId}/summary${query({ threshold })}`,
   );
+  const incomplete = !payload.summary.risk_counts
+    || !Array.isArray(payload.summary.warnings)
+    || payload.summary.target_present === undefined
+    || payload.summary.target_valid === undefined;
+  if (!incomplete) return payload;
+
+  // Older universal sessions can still be open after the application was
+  // updated. Complete their legacy summary from stable companion endpoints so
+  // a restored session renders correctly without forcing the user to rerun it.
+  const [distribution, status] = await Promise.all([
+    request<RiskDistribution>(
+      `/analyses/${analysisId}/distribution${query({ threshold, bins: 10 })}`,
+    ),
+    getAnalysisStatus(analysisId),
+  ]);
+  return {
+    ...payload,
+    summary: {
+      ...payload.summary,
+      risk_counts: payload.summary.risk_counts ?? distribution.risk_counts,
+      warnings: payload.summary.warnings ?? status.warnings,
+      target_present: payload.summary.target_present ?? payload.metrics.available,
+      target_valid: payload.summary.target_valid ?? payload.metrics.available,
+    },
+  };
 }
 
 export function getAnalysisResults(
@@ -109,6 +173,56 @@ export function getAnalysisDistribution(
   );
 }
 
+function universalQuery(options: UniversalResultsQuery = {}) {
+  return query({
+    page: options.page ?? 1,
+    page_size: options.pageSize ?? 50,
+    risk_level: options.riskLevel,
+    requires_review: options.requiresReview === undefined ? undefined : String(options.requiresReview),
+    probability_min: options.probabilityMin,
+    probability_max: options.probabilityMax,
+    search: options.search || undefined,
+  });
+}
+
+function normalizeRows<T extends AnalysisRow>(page: UniversalPage<T>): UniversalPage<T> {
+  return {
+    ...page,
+    items: page.items.map((row) => ({
+      ...row,
+      explanation_factors: row.explanation_factors ?? [],
+      analysis_warnings: row.analysis_warnings ?? [],
+    })),
+  };
+}
+
+export async function getAnalysisClients(
+  analysisId: string,
+  options: UniversalResultsQuery = {},
+): Promise<UniversalPage<AnalysisRow>> {
+  return normalizeRows(await request(`/analyses/${analysisId}/clients${universalQuery(options)}`));
+}
+
+export async function getAnalysisTransactions(
+  analysisId: string,
+  options: UniversalResultsQuery = {},
+): Promise<UniversalPage<TransactionRow>> {
+  return normalizeRows(await request(`/analyses/${analysisId}/transactions${universalQuery(options)}`));
+}
+
+export function getAnalysisRelationships(
+  analysisId: string,
+  options: { page?: number; pageSize?: number; kind?: string; entityId?: string; probabilityMin?: number } = {},
+): Promise<UniversalPage<RelationshipRow>> {
+  return request(`/analyses/${analysisId}/relationships${query({
+    page: options.page ?? 1,
+    page_size: options.pageSize ?? 100,
+    kind: options.kind,
+    entity_id: options.entityId,
+    probability_min: options.probabilityMin,
+  })}`);
+}
+
 export function reportUrl(
   analysisId: string,
   threshold?: number,
@@ -138,6 +252,34 @@ export async function downloadAnalysisReport(
     blob: await response.blob(),
     filename: matchedName ?? `analysis-${analysisId}${requiresReview ? "-review" : ""}.csv`,
   };
+}
+
+export function getInvestigation(analysisId: string, entityId: string): Promise<InvestigationDetails> {
+  return request(`/analyses/${analysisId}/investigations/${encodeURIComponent(entityId)}`);
+}
+
+export function updateInvestigation(
+  analysisId: string,
+  entityId: string,
+  patch: { status: InvestigationStatus; comment: string },
+): Promise<InvestigationDetails> {
+  return request(`/analyses/${analysisId}/investigations/${encodeURIComponent(entityId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function downloadUniversalExport(
+  analysisId: string,
+  kind: UniversalExportKind,
+  masked = true,
+): Promise<ReportDownload> {
+  const response = await fetch(`${API_BASE}/analyses/${analysisId}/exports/${kind}${query({ masked: String(masked) })}`);
+  if (!response.ok) throw new ApiClientError("report_download_failed", "Не удалось подготовить выбранную выгрузку.");
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const matchedName = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+  return { blob: await response.blob(), filename: matchedName ?? `analysis-${analysisId}-${kind}.csv` };
 }
 
 export async function deleteAnalysis(analysisId: string): Promise<void> {

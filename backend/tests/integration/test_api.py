@@ -3,11 +3,13 @@ from __future__ import annotations
 import csv
 import io
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -58,14 +60,19 @@ def wait_until_finished(client: TestClient, analysis_id: str) -> dict:
         payload = response.json()
         observed.append(payload["status"])
         assert 0 <= payload["progress"] <= 100
-        if payload["status"] in {"completed", "failed"}:
+        if payload["status"] in {"completed", "failed", "cancelled"}:
             payload["observed_statuses"] = observed
             return payload
         time.sleep(0.01)
     raise AssertionError("Analysis did not finish in time.")
 
 
-def create_test_app(tmp_path: Path, *, max_bytes: int = 1024 * 1024):
+def create_test_app(
+    tmp_path: Path,
+    *,
+    max_bytes: int = 1024 * 1024,
+    max_records: int = 1_000_000,
+):
     manifest = build_manifest(model_frame())
     manifest.model_version = "api-test"
     manifest.review_threshold = 0.5
@@ -74,6 +81,8 @@ def create_test_app(tmp_path: Path, *, max_bytes: int = 1024 * 1024):
         manifest=manifest,
         session_dir=tmp_path / "sessions",
         max_input_bytes=max_bytes,
+        max_input_records=max_records,
+        dictionary_path=None,
     )
 
 
@@ -271,7 +280,7 @@ def test_rejects_oversize_unsupported_and_incompatible_csv(tmp_path: Path) -> No
         )
         assert oversized.status_code == 413
         assert oversized.json()["error"]["code"] == "file_too_large"
-        assert not list((tmp_path / "sessions" / "_incoming").glob("*.csv"))
+        assert not list((tmp_path / "sessions" / "_incoming").iterdir())
 
         unsupported = client.post(
             "/api/analyses",
@@ -296,6 +305,138 @@ def test_rejects_oversize_unsupported_and_incompatible_csv(tmp_path: Path) -> No
         assert summary.json()["error"]["details"] == failed["errors"]
 
 
+@pytest.mark.parametrize(
+    ("filename", "content", "expected_format", "expected_stage"),
+    [
+        ("month.json", b'[{"amount": 1}]', "json", "analysis_pending"),
+        ("month.jsonl", b'{"amount": 1}\n', "jsonl", "analysis_pending"),
+        ("month.ndjson", b'{"amount": 1}\n', "ndjson", "analysis_pending"),
+        (
+            "month.sql",
+            b"CREATE TABLE tx (id INT); INSERT INTO tx VALUES (1);",
+            "sql_dump",
+            "analysis_pending",
+        ),
+        ("month.bson", b"\x05\x00\x00\x00\x00", "bson", "analysis_pending"),
+    ],
+)
+def test_accepts_agreed_source_signatures_before_adapter_stage(
+    tmp_path: Path,
+    filename: str,
+    content: bytes,
+    expected_format: str,
+    expected_stage: str,
+) -> None:
+    with TestClient(create_test_app(tmp_path)) as client:
+        response = client.post(
+            "/api/analyses",
+            files={"file": (filename, content, "application/octet-stream")},
+        )
+        assert response.status_code == 202, response.text
+        assert response.json()["source_format"] == expected_format
+
+        result = wait_until_finished(client, response.json()["analysis_id"])
+        assert result["status"] == "failed"
+        assert result["stage"] == expected_stage
+        assert result["source_format"] == expected_format
+        assert result["received_bytes"] == len(content)
+        job = client.app.state.analysis_manager.get_job(
+            response.json()["analysis_id"]
+        )
+        if expected_stage == "analysis_pending":
+            assert job.inventory is not None
+            assert job.mapping is not None
+            assert job.plan is not None
+            assert sum(
+                dataset.row_count for dataset in job.inventory.datasets
+            ) <= 1
+        else:
+            assert job.inventory is None
+        assert not list((tmp_path / "sessions" / "_incoming").iterdir())
+
+
+def test_accepts_valid_sqlite_before_mapping_stage(tmp_path: Path) -> None:
+    database = tmp_path / "fixture.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE tx (id INTEGER PRIMARY KEY, amount REAL)")
+        connection.execute("INSERT INTO tx VALUES (1, 25.5)")
+
+    with TestClient(create_test_app(tmp_path / "app")) as client:
+        response = client.post(
+            "/api/analyses",
+            files={
+                "file": (
+                    "month.sqlite",
+                    database.read_bytes(),
+                    "application/vnd.sqlite3",
+                )
+            },
+        )
+        assert response.status_code == 202, response.text
+        result = wait_until_finished(client, response.json()["analysis_id"])
+        assert result["status"] == "failed"
+        assert result["stage"] == "analysis_pending"
+        job = client.app.state.analysis_manager.get_job(response.json()["analysis_id"])
+        assert job.inventory is not None
+        assert job.mapping is not None
+        assert job.plan is not None
+        assert job.inventory.datasets[0].row_count == 1
+
+
+def test_rejects_signature_mismatch_before_creating_job(tmp_path: Path) -> None:
+    with TestClient(create_test_app(tmp_path)) as client:
+        response = client.post(
+            "/api/analyses",
+            files={"file": ("fake.sqlite", b"not sqlite", "application/octet-stream")},
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "invalid_file_signature"
+        assert not client.app.state.analysis_manager.jobs
+        assert not list((tmp_path / "sessions" / "_incoming").iterdir())
+
+
+def test_record_limit_fails_safely_and_removes_staged_file(tmp_path: Path) -> None:
+    with TestClient(create_test_app(tmp_path, max_records=2)) as client:
+        analysis_id = upload(client, csv_bytes())
+        result = wait_until_finished(client, analysis_id)
+        assert result["status"] == "failed"
+        assert result["stage"] == "input_limit_exceeded"
+        assert "2" in result["errors"][0]
+        assert not list((tmp_path / "sessions" / "_incoming").iterdir())
+
+
+def test_cancel_running_analysis_removes_staged_file_and_partial_session(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app.api import routes
+
+    entered = threading.Event()
+    release = threading.Event()
+    original_read_csv = routes.read_csv
+
+    def blocking_read_csv(path):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original_read_csv(path)
+
+    monkeypatch.setattr(routes, "read_csv", blocking_read_csv)
+    with TestClient(create_test_app(tmp_path)) as client:
+        analysis_id = upload(client, csv_bytes())
+        assert entered.wait(timeout=5)
+        response = client.post(f"/api/analyses/{analysis_id}/cancel")
+        assert response.status_code == 202
+        assert response.json()["status"] == "cancel_requested"
+        release.set()
+
+        result = wait_until_finished(client, analysis_id)
+        assert result["status"] == "cancelled"
+        assert result["stage"] == "cancelled"
+        assert result["can_cancel"] is False
+        assert not (tmp_path / "sessions" / analysis_id).exists()
+        assert not list((tmp_path / "sessions" / "_incoming").iterdir())
+
+
 def test_startup_cleanup_and_missing_model_status(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions")
     old_session = store.create_session(
@@ -312,10 +453,14 @@ def test_startup_cleanup_and_missing_model_status(tmp_path: Path) -> None:
         threshold=0.5,
     )
     assert (store.root / old_session).exists()
+    stale_upload = store.root / "_incoming" / "72b43db0-1cc1-4144-b16f-b3c1dd58fb0e"
+    stale_upload.mkdir(parents=True)
+    (stale_upload / "source.csv").write_bytes(b"id\n1\n")
 
     app = create_test_app(tmp_path)
     with TestClient(app):
         assert not (store.root / old_session).exists()
+        assert not stale_upload.exists()
 
     unavailable = create_app(
         artifact_dir=tmp_path / "missing-artifacts",

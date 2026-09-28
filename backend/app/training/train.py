@@ -28,11 +28,18 @@ from app.core.config import (
     TARGET_COLUMN,
 )
 from app.core.model_loader import sha256_file
+from app.core.model_loader import load_artifacts
 from app.services.csv_reader import read_csv
+from app.services.client_feature_schema import (
+    CLIENT_FEATURE_SCHEMA_VERSION,
+    SHAP_DICTIONARY_VERSION,
+    canonicalize_client_frame,
+)
 from app.services.preprocessing import (
     build_manifest,
     ensure_binary_target,
     find_conflicting_duplicate_features,
+    is_identifier_column,
     remove_exact_duplicates,
     transform_features,
 )
@@ -89,6 +96,7 @@ def train_model(
     test_size: float = DEFAULT_TEST_SIZE,
     iterations: int = DEFAULT_ITERATIONS,
     model_version: str = MODEL_VERSION,
+    baseline_artifact_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     frame, csv_metadata = read_csv(input_path)
     if target_column not in frame.columns:
@@ -96,7 +104,11 @@ def train_model(
 
     frame, removed_duplicates = remove_exact_duplicates(frame)
     target = ensure_binary_target(frame[target_column])
-    raw_features = frame.drop(columns=[target_column])
+    all_raw_features = frame.drop(columns=[target_column])
+    technical_identifiers = [
+        str(column) for column in all_raw_features.columns if is_identifier_column(str(column))
+    ]
+    raw_features = all_raw_features.drop(columns=technical_identifiers)
 
     conflict_count = find_conflicting_duplicate_features(
         frame,
@@ -119,14 +131,25 @@ def train_model(
     y_train = target.iloc[train_indices].reset_index(drop=True)
     y_test = target.iloc[test_indices].reset_index(drop=True)
 
+    canonical_train, feature_sources, feature_labels = canonicalize_client_frame(raw_train)
     manifest = build_manifest(
-        pd.concat([raw_train, y_train.rename(target_column)], axis=1),
+        pd.concat([canonical_train, y_train.rename(target_column)], axis=1),
         target_column=target_column,
         model_version=model_version,
         random_seed=random_seed,
     )
     manifest.training_rows = len(raw_train)
     manifest.target_rate = float(y_train.mean())
+    manifest.identifier_columns = technical_identifiers
+    manifest.canonical_schema_version = CLIENT_FEATURE_SCHEMA_VERSION
+    manifest.feature_sources = {
+        name: feature_sources[name] for name in manifest.feature_columns
+    }
+    manifest.feature_labels = {
+        name: feature_labels[name] for name in manifest.feature_columns
+    }
+    manifest.shap_dictionary_version = SHAP_DICTIONARY_VERSION
+    manifest.training_source_sha256 = sha256_file(Path(input_path))
 
     x_train = transform_features(raw_train, manifest)
     x_test = transform_features(raw_test, manifest)
@@ -173,6 +196,23 @@ def train_model(
     manifest.model_sha256 = sha256_file(model_path)
     manifest.save(output / "manifest.json")
 
+    shap_dictionary = {
+        "schema_version": SHAP_DICTIONARY_VERSION,
+        "model_version": model_version,
+        "canonical_schema_version": CLIENT_FEATURE_SCHEMA_VERSION,
+        "features": {
+            name: {
+                **manifest.feature_labels[name],
+                "source_aliases": manifest.feature_sources[name],
+            }
+            for name in manifest.feature_columns
+        },
+    }
+    (output / "shap_dictionary.json").write_text(
+        json.dumps(shap_dictionary, ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
+
     metrics = {
         "model_version": model_version,
         "delimiter": csv_metadata.delimiter,
@@ -184,8 +224,66 @@ def train_model(
         "target_rate_test": float(y_test.mean()),
         "features": len(manifest.feature_columns),
         "categorical_features": len(manifest.categorical_features),
+        "canonical_schema_version": CLIENT_FEATURE_SCHEMA_VERSION,
+        "training_source_sha256": manifest.training_source_sha256,
         "test": _metric_payload(y_test, probabilities, threshold),
     }
+
+    renamed = raw_test.rename(
+        columns={
+            source: next(
+                (
+                    alias
+                    for alias in manifest.feature_sources.get(feature, [])
+                    if alias not in {source, feature}
+                ),
+                source,
+            )
+            for feature, source_aliases in manifest.feature_sources.items()
+            for source in source_aliases[:1]
+            if source in raw_test.columns
+        }
+    )
+    renamed_probabilities = model.predict_proba(transform_features(renamed, manifest))[:, 1]
+    semantic_delta = float(np.max(np.abs(probabilities - renamed_probabilities)))
+    regression: dict[str, Any] = {
+        "semantic_alias_equivalence": {
+            "rows": len(raw_test),
+            "max_absolute_probability_delta": semantic_delta,
+            "tolerance": 1e-12,
+            "passed": semantic_delta <= 1e-12,
+        }
+    }
+    if baseline_artifact_dir is not None:
+        baseline_model, baseline_manifest = load_artifacts(baseline_artifact_dir)
+        baseline_probabilities = baseline_model.predict_proba(
+            transform_features(raw_test, baseline_manifest)
+        )[:, 1]
+        baseline_threshold = baseline_manifest.review_threshold
+        baseline_metrics = _metric_payload(y_test, baseline_probabilities, baseline_threshold)
+        candidate_metrics = metrics["test"]
+        probability_delta = float(np.max(np.abs(probabilities - baseline_probabilities)))
+        regression["baseline_comparison"] = {
+            "baseline_model_version": baseline_manifest.model_version,
+            "candidate_model_version": model_version,
+            "rows": len(raw_test),
+            "max_absolute_probability_delta": probability_delta,
+            "metric_deltas": {
+                key: float(candidate_metrics[key] - baseline_metrics[key])
+                for key in ("gini", "ks", "accuracy", "precision", "recall", "roc_auc", "pr_auc")
+            },
+            "baseline_test": baseline_metrics,
+            "passed": (
+                candidate_metrics["roc_auc"] >= baseline_metrics["roc_auc"] - 0.02
+                and candidate_metrics["pr_auc"] >= baseline_metrics["pr_auc"] - 0.02
+                and candidate_metrics["recall"] >= baseline_metrics["recall"] - 0.05
+            ),
+        }
+    metrics["regression"] = regression
+    (output / "regression.json").write_text(
+        json.dumps(regression, ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
     (output / "metrics.json").write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
@@ -202,6 +300,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-size", type=float, default=DEFAULT_TEST_SIZE)
     parser.add_argument("--iterations", type=int, default=DEFAULT_ITERATIONS)
     parser.add_argument("--model-version", default=MODEL_VERSION)
+    parser.add_argument("--baseline-artifacts", type=Path)
     return parser
 
 
@@ -215,6 +314,7 @@ def main() -> None:
         test_size=args.test_size,
         iterations=args.iterations,
         model_version=args.model_version,
+        baseline_artifact_dir=args.baseline_artifacts,
     )
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
 

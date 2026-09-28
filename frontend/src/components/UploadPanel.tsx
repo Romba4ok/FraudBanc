@@ -1,6 +1,14 @@
 import { useRef, useState } from "react";
 
-const MAX_FILE_BYTES = 150 * 1024 * 1024;
+const MAX_FILE_BYTES = 500 * 1024 * 1024;
+const SUPPORTED_EXTENSIONS = [
+  ".csv", ".json", ".jsonl", ".ndjson", ".sql", ".sqlite", ".sqlite3", ".db", ".bson",
+];
+
+function fileExtension(filename: string): string {
+  const dot = filename.lastIndexOf(".");
+  return dot >= 0 ? filename.slice(dot).toLowerCase() : "";
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
@@ -23,19 +31,19 @@ export function UploadPanel({ disabled = false, onUpload }: UploadPanelProps) {
       setFile(null);
       return;
     }
-    if (!candidate.name.toLowerCase().endsWith(".csv")) {
+    if (!SUPPORTED_EXTENSIONS.includes(fileExtension(candidate.name))) {
       setFile(null);
-      setValidationError("Выберите файл с расширением .csv.");
+      setValidationError("Выберите CSV, JSON, SQL, SQLite или BSON-файл.");
       return;
     }
     if (candidate.size === 0) {
       setFile(null);
-      setValidationError("Файл пуст. Добавьте CSV со строкой заголовков и данными.");
+      setValidationError("Файл пуст. Добавьте источник с данными для анализа.");
       return;
     }
     if (candidate.size > MAX_FILE_BYTES) {
       setFile(null);
-      setValidationError("Размер файла превышает допустимые 150 МБ.");
+      setValidationError("Размер файла превышает допустимые 500 МБ.");
       return;
     }
     setFile(candidate);
@@ -47,8 +55,8 @@ export function UploadPanel({ disabled = false, onUpload }: UploadPanelProps) {
         <p className="eyebrow">Новый анализ</p>
         <h2 id="upload-title">Передайте выборку модели</h2>
         <p className="muted">
-          CSV до 150 МБ. Разделитель определяется автоматически, данные остаются
-          на этом компьютере.
+          CSV, JSON, SQL, SQLite или BSON до 500 МБ. Структура определяется
+          автоматически, данные остаются на этом компьютере.
         </p>
       </div>
       <div
@@ -71,15 +79,17 @@ export function UploadPanel({ disabled = false, onUpload }: UploadPanelProps) {
       >
         <input
           ref={inputRef}
-          aria-label="Выберите CSV файл"
-          accept=".csv,text/csv"
+          aria-label="Выберите файл с данными"
+          accept={SUPPORTED_EXTENSIONS.join(",")}
           disabled={disabled}
           hidden
           type="file"
           onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
         />
-        <span className="drop-zone__mark" aria-hidden="true">CSV</span>
-        <strong>{file ? file.name : "Выберите CSV-файл"}</strong>
+        <span className="drop-zone__mark" aria-hidden="true">
+          {file ? fileExtension(file.name).slice(1).toUpperCase() : "DATA"}
+        </span>
+        <strong>{file ? file.name : "Выберите файл с данными"}</strong>
         <span>{file ? formatFileSize(file.size) : "или перетащите его сюда"}</span>
         {file && (
           <button
@@ -104,7 +114,7 @@ export function UploadPanel({ disabled = false, onUpload }: UploadPanelProps) {
         type="button"
         onClick={() => file && onUpload(file)}
       >
-        {disabled ? "Файл обрабатывается" : "Запустить анализ"}
+        {disabled ? "Проверяем источник" : "Проверить источник"}
       </button>
     </section>
   );

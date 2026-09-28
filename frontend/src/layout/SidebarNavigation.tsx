@@ -5,6 +5,8 @@ const routeMarks: Record<DashboardRouteId, string> = {
   "new-analysis": "+",
   overview: "◫",
   "risk-records": "↗",
+  transactions: "⇄",
+  relationships: "⌘",
   "model-quality": "◎",
   "data-quality": "◇",
 };

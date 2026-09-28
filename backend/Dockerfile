@@ -12,15 +12,19 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY pyproject.toml ./
-COPY app ./app
+COPY app/__init__.py ./app/__init__.py
 RUN python -m pip install --upgrade pip \
     && python -m pip install .
+
+COPY app ./app
+RUN python -m pip install . --no-deps
 
 COPY artifacts ./artifacts
 
 RUN groupadd --system app \
     && useradd --system --gid app --home-dir /app app \
-    && chown -R app:app /app
+    && mkdir -p /var/lib/risk-ledger \
+    && chown -R app:app /app /var/lib/risk-ledger
 
 USER app
 

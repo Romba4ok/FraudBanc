@@ -36,7 +36,7 @@ describe("dashboard shell", () => {
       </DashboardShell>,
     );
 
-    await user.click(screen.getByRole("link", { name: "Рискованные записи" }));
+    await user.click(screen.getByRole("link", { name: "Клиенты" }));
     expect(navigate).toHaveBeenCalledWith("risk-records");
 
     await user.click(screen.getByRole("button", { name: "Настройки отображения" }));

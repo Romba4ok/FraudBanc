@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiClientError,
+  cancelAnalysis,
   createAnalysis,
   deleteAnalysis,
   getAnalysisDistribution,
+  getAnalysisClients,
+  getAnalysisTransactions,
+  getAnalysisRelationships,
+  getAnalysisInventory,
+  getAnalysisPlan,
   getAnalysisResults,
   getAnalysisStatus,
   getAnalysisSummary,
+  runAnalysis,
+  updateAnalysisPeriod,
 } from "./api/client";
 import { DashboardShell } from "./layout/DashboardShell";
 import { DataQualityPage } from "./routes/DataQualityPage";
@@ -14,14 +22,21 @@ import { ModelQualityPage } from "./routes/ModelQualityPage";
 import { NewAnalysisPage } from "./routes/NewAnalysisPage";
 import { OverviewPage } from "./routes/OverviewPage";
 import { RiskRecordsPage } from "./routes/RiskRecordsPage";
+import { TransactionsPage } from "./routes/TransactionsPage";
+import { RelationshipsPage } from "./routes/RelationshipsPage";
 import { useDashboardRoute } from "./routes/useDashboardRoute";
 import type {
   AnalysisRow,
+  AnalysisPlan,
   AnalysisStatus,
   AnalysisSummary,
   ResultPage,
   RiskDistribution,
   RiskLevel,
+  SourceInventory,
+  TransactionRow,
+  RelationshipRow,
+  UniversalPage,
 } from "./types/analysis";
 import type { SessionNotification } from "./types/notifications";
 import { parseQualityIssues } from "./utils/dataQuality";
@@ -34,10 +49,10 @@ const delay = (milliseconds: number) =>
 const errorMessages: Record<string, string> = {
   analysis_failed: "Анализ не удалось завершить.",
   analysis_not_found: "Предыдущая сессия уже завершена или была удалена.",
-  file_too_large: "Размер файла превышает допустимые 150 МБ.",
+  file_too_large: "Размер файла превышает допустимые 500 МБ.",
   model_unavailable: "Локальная модель сейчас недоступна.",
   request_failed: "Не удалось связаться с локальным сервисом анализа.",
-  unsupported_file: "Поддерживаются только CSV-файлы.",
+  unsupported_file: "Поддерживаются CSV, JSON, SQL, SQLite и BSON-файлы.",
 };
 
 interface VisibleError {
@@ -62,10 +77,15 @@ const DEFAULT_ADVANCED_FILTERS: AdvancedRecordFilters = {
 export default function App() {
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
+  const [inventory, setInventory] = useState<SourceInventory | null>(null);
+  const [plan, setPlan] = useState<AnalysisPlan | null>(null);
   const [summary, setSummary] = useState<AnalysisSummary | null>(null);
   const [results, setResults] = useState<ResultPage | null>(null);
   const [topRiskRows, setTopRiskRows] = useState<AnalysisRow[]>([]);
   const [distribution, setDistribution] = useState<RiskDistribution | null>(null);
+  const [clients, setClients] = useState<UniversalPage<AnalysisRow> | null>(null);
+  const [transactions, setTransactions] = useState<UniversalPage<TransactionRow> | null>(null);
+  const [relationships, setRelationships] = useState<UniversalPage<RelationshipRow> | null>(null);
   const [error, setError] = useState<VisibleError | null>(null);
   const [riskLevel, setRiskLevel] = useState<RiskLevel | "all">("all");
   const [page, setPage] = useState(1);
@@ -75,6 +95,8 @@ export default function App() {
   const [advancedFilters, setAdvancedFilters] = useState(DEFAULT_ADVANCED_FILTERS);
   const [appliedAdvancedFilters, setAppliedAdvancedFilters] = useState(DEFAULT_ADVANCED_FILTERS);
   const [refreshing, setRefreshing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [starting, setStarting] = useState(false);
   const runId = useRef(0);
   const restorationStarted = useRef(false);
   const resultsRequestId = useRef(0);
@@ -121,7 +143,7 @@ export default function App() {
     ) => {
       const requestId = resultsRequestId.current + 1;
       resultsRequestId.current = requestId;
-      const [nextSummary, nextResults, nextDistribution] = await Promise.all([
+      const [nextSummary, nextResults, nextDistribution, nextClients, nextTransactions, nextRelationships] = await Promise.all([
         getAnalysisSummary(id, threshold),
         getAnalysisResults(id, {
           page: nextPage,
@@ -134,6 +156,9 @@ export default function App() {
           recordId: filters.recordId.trim() || undefined,
         }),
         updateDistribution ? getAnalysisDistribution(id, threshold) : Promise.resolve(null),
+        updateOverview ? getAnalysisClients(id, { pageSize: 100 }) : Promise.resolve(null),
+        updateOverview ? getAnalysisTransactions(id, { pageSize: 100 }) : Promise.resolve(null),
+        updateOverview ? getAnalysisRelationships(id, { pageSize: 100 }) : Promise.resolve(null),
       ]);
       if (requestId !== resultsRequestId.current) return;
       setSummary(nextSummary);
@@ -141,6 +166,9 @@ export default function App() {
       if (updateOverview) setTopRiskRows(nextResults.items.slice(0, 5));
       if (updateOverview) setModelThresholdPercent(Math.round(nextSummary.threshold * 100));
       if (nextDistribution) setDistribution(nextDistribution);
+      if (nextClients) setClients(nextClients);
+      if (nextTransactions) setTransactions(nextTransactions);
+      if (nextRelationships) setRelationships(nextRelationships);
       setThresholdPercent(Math.round(nextSummary.threshold * 100));
     },
     [],
@@ -159,6 +187,17 @@ export default function App() {
           nextStatus.errors,
         );
       }
+      if (nextStatus.status === "planned") {
+        const [nextInventory, nextPlan] = await Promise.all([
+          getAnalysisInventory(id),
+          getAnalysisPlan(id),
+        ]);
+        if (runId.current !== currentRun) return;
+        setInventory(nextInventory);
+        setPlan(nextPlan);
+        return;
+      }
+      if (nextStatus.status === "cancelled") return;
       if (nextStatus.status === "completed") {
         await loadResults(id, 1, "all", undefined, true);
         return;
@@ -228,9 +267,14 @@ export default function App() {
     }
 
     setSummary(null);
+    setInventory(null);
+    setPlan(null);
     setResults(null);
     setTopRiskRows([]);
     setDistribution(null);
+    setClients(null);
+    setTransactions(null);
+    setRelationships(null);
     setRiskLevel("all");
     setPage(1);
     setAppliedThreshold(undefined);
@@ -257,7 +301,52 @@ export default function App() {
       setResults(null);
       setTopRiskRows([]);
       setDistribution(null);
+      setClients(null);
+      setTransactions(null);
+      setRelationships(null);
       showError(caught);
+    }
+  };
+
+  const handleRun = async (period: { start: string | null; end: string | null }) => {
+    if (!analysisId || !status || status.status !== "planned") return;
+    const currentRun = runId.current + 1;
+    runId.current = currentRun;
+    setStarting(true);
+    setError(null);
+    try {
+      if (plan?.time_range) {
+        const nextPlan = await updateAnalysisPeriod(analysisId, period);
+        setPlan(nextPlan);
+      }
+      await runAnalysis(analysisId);
+      setStatus({
+        ...status,
+        status: "validating",
+        stage: "validating",
+        progress: Math.max(status.progress, 46),
+        can_cancel: true,
+      });
+      await pollAnalysis(analysisId, currentRun);
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!analysisId || cancelling) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      await cancelAnalysis(analysisId);
+      const nextStatus = await getAnalysisStatus(analysisId);
+      setStatus(nextStatus);
+    } catch (caught) {
+      showError(caught);
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -359,10 +448,15 @@ export default function App() {
     }
     setAnalysisId(null);
     setStatus(null);
+    setInventory(null);
+    setPlan(null);
     setSummary(null);
     setResults(null);
     setTopRiskRows([]);
     setDistribution(null);
+    setClients(null);
+    setTransactions(null);
+    setRelationships(null);
     setError(null);
     window.localStorage.removeItem(ACTIVE_ANALYSIS_KEY);
     navigate("new-analysis", true);
@@ -384,7 +478,13 @@ export default function App() {
           hasActiveAnalysis={Boolean(analysisId || summary)}
           processing={processing}
           status={status}
+          inventory={inventory}
+          plan={plan}
+          cancelling={cancelling}
+          starting={starting}
+          onCancel={() => { void handleCancel(); }}
           onClearError={() => { void closeSession(); }}
+          onRun={(period) => { void handleRun(period); }}
           onStart={(file) => { void handleUpload(file); }}
         />
       </DashboardShell>
@@ -411,20 +511,22 @@ export default function App() {
   if (activeRoute === "risk-records") {
     routeContent = (
       <RiskRecordsPage
+        analysisId={analysisId}
         busy={refreshing}
         distribution={distribution}
         errorMessage={error?.message}
         modelThresholdPercent={modelThresholdPercent}
-        page={page}
-        pageSize={results.page_size}
+        page={clients?.page ?? page}
+        pageSize={clients?.page_size ?? results.page_size}
         probabilityMax={advancedFilters.probabilityMax}
         probabilityMin={advancedFilters.probabilityMin}
         recordId={advancedFilters.recordId}
         requiresReview={advancedFilters.requiresReview}
         riskLevel={riskLevel}
-        rows={results.items}
+        rows={clients?.items.length ? clients.items : results.items}
+        relatedTransactions={transactions?.items ?? []}
         thresholdPercent={thresholdPercent}
-        total={results.total}
+        total={clients?.total ?? results.total}
         onFiltersApply={applyAdvancedFilters}
         onFiltersReset={resetAdvancedFilters}
         onPageChange={changePage}
@@ -438,6 +540,10 @@ export default function App() {
         onRequiresReviewChange={(value) => setAdvancedFilters((current) => ({ ...current, requiresReview: value }))}
       />
     );
+  } else if (activeRoute === "transactions") {
+    routeContent = <TransactionsPage analysisId={analysisId} rows={transactions?.items ?? []} total={transactions?.total ?? 0} />;
+  } else if (activeRoute === "relationships") {
+    routeContent = <RelationshipsPage rows={relationships?.items ?? []} total={relationships?.total ?? 0} />;
   } else if (activeRoute === "model-quality") {
     routeContent = <ModelQualityPage metrics={summary.metrics} />;
   } else if (activeRoute === "data-quality") {
@@ -454,6 +560,10 @@ export default function App() {
         analysisId={analysisId}
         filename={status?.filename ?? null}
         rows={topRiskRows}
+        clients={clients?.items ?? topRiskRows}
+        clientTotal={clients?.total ?? results.total}
+        transactions={transactions?.items ?? []}
+        transactionTotal={transactions?.total ?? 0}
         summary={summary}
         onCloseSession={closeSession}
         onNavigate={navigate}

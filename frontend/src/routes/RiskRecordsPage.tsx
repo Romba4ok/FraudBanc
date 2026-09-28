@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { ColumnPicker } from "../components/ColumnPicker";
+import { AnalystBrief } from "../components/AnalystBrief";
 import { RecordDetails } from "../components/RecordDetails";
 import { RiskDistributionCharts } from "../components/RiskDistributionCharts";
 import { RiskFilters } from "../components/RiskFilters";
 import { RiskTable } from "../components/RiskTable";
 import type { RiskTableColumn } from "../components/RiskTable";
-import type { AnalysisRow, RiskDistribution, RiskLevel } from "../types/analysis";
+import type { AnalysisRow, RiskDistribution, RiskLevel, TransactionRow } from "../types/analysis";
 
 interface RiskRecordsPageProps {
+  analysisId?: string;
   busy: boolean;
   distribution: RiskDistribution | null;
   errorMessage?: string | null;
@@ -20,6 +22,7 @@ interface RiskRecordsPageProps {
   requiresReview: boolean;
   riskLevel: RiskLevel | "all";
   rows: AnalysisRow[];
+  relatedTransactions?: TransactionRow[];
   thresholdPercent: number;
   total: number;
   onFiltersApply: () => void;
@@ -79,14 +82,25 @@ export function RiskRecordsPage(props: RiskRecordsPageProps) {
     else window.setTimeout(restoreFocus, 0);
   };
 
-  const details = selected ? <RecordDetails key={selected.record_id} row={selected} onClose={closeDetails} /> : null;
+  const clientIds = selected ? [selected.record_id, selected.client_id, selected.customer_id, selected.subject_id].filter(Boolean).map(String) : [];
+  const related = (props.relatedTransactions ?? []).filter((transaction) => clientIds.includes(String(transaction.client_id ?? "")));
+  const details = selected ? <RecordDetails key={selected.record_id} row={selected} analysisId={props.analysisId} relatedTransactions={related} onClose={closeDetails} /> : null;
 
   return (
     <div className="section-page records-page">
       <header className="section-page__intro records-page__intro">
-        <div><p className="eyebrow">Результаты ранжирования</p><h1>Рискованные записи</h1><p>Записи отсортированы сервером от наиболее подозрительных к наименее рискованным.</p></div>
+        <div><p className="eyebrow">Клиентский профиль</p><h1>Рискованные клиенты</h1><p>Клиенты отсортированы сервером от наиболее подозрительных к наименее рискованным.</p></div>
         <ColumnPicker visible={visibleColumns} onToggle={toggleColumn} />
       </header>
+      <AnalystBrief
+        title="Как проверить клиента"
+        description="Список уже отсортирован по риску: двигайтесь сверху вниз и проверяйте объяснение модели."
+        steps={[
+          { label: "Риск", text: "Начните с критических клиентов" },
+          { label: "Факторы", text: "Сопоставьте причины с исходными данными" },
+          { label: "Решение", text: "Зафиксируйте итог ручной проверки" },
+        ]}
+      />
       {props.distribution && <RiskDistributionCharts distribution={props.distribution} />}
       {props.errorMessage && <div className="inline-alert" role="alert">{props.errorMessage}</div>}
       <RiskFilters

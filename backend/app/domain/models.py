@@ -44,6 +44,11 @@ class ModelManifest:
     target_rate: float
     model_filename: str = "model.cbm"
     model_sha256: str = ""
+    canonical_schema_version: str | None = None
+    feature_sources: dict[str, list[str]] = field(default_factory=dict)
+    feature_labels: dict[str, dict[str, str]] = field(default_factory=dict)
+    shap_dictionary_version: str | None = None
+    training_source_sha256: str = ""
 
     def profile_map(self) -> dict[str, FeatureProfile]:
         return {profile.name: profile for profile in self.feature_profiles}

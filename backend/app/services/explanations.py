@@ -53,7 +53,15 @@ def explain_batch(
         factors = []
         for feature_index in strongest:
             contribution = float(row_values[feature_index])
-            feature = manifest.feature_columns[int(feature_index)]
+            canonical_feature = manifest.feature_columns[int(feature_index)]
+            feature = next(
+                (
+                    alias
+                    for alias in manifest.feature_sources.get(canonical_feature, [])
+                    if alias != canonical_feature
+                ),
+                canonical_feature,
+            )
             factors.append(
                 ExplanationFactor(
                     feature=feature,

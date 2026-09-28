@@ -7,10 +7,18 @@ import type { AnalysisStatus, AnalysisSummary, ResultPage } from "../src/types/a
 
 const api = vi.hoisted(() => ({
   createAnalysis: vi.fn(),
+  cancelAnalysis: vi.fn(),
+  getAnalysisInventory: vi.fn(),
+  getAnalysisPlan: vi.fn(),
+  updateAnalysisPeriod: vi.fn(),
+  runAnalysis: vi.fn(),
   getAnalysisStatus: vi.fn(),
   getAnalysisSummary: vi.fn(),
   getAnalysisResults: vi.fn(),
   getAnalysisDistribution: vi.fn(),
+  getAnalysisClients: vi.fn(),
+  getAnalysisTransactions: vi.fn(),
+  getAnalysisRelationships: vi.fn(),
   downloadAnalysisReport: vi.fn(),
   deleteAnalysis: vi.fn(),
   reportUrl: vi.fn(),
@@ -37,6 +45,43 @@ const completeStatus: AnalysisStatus = {
   stage: "completed",
   warnings: [],
   errors: [],
+};
+
+const plannedStatus: AnalysisStatus = {
+  analysis_id: "analysis-1",
+  filename: "transactions.sqlite",
+  status: "planned",
+  progress: 45,
+  stage: "planning",
+  source_format: "sqlite",
+  received_bytes: 4096,
+  can_cancel: true,
+  warnings: [],
+  errors: [],
+};
+
+const inventory = {
+  analysis_id: "analysis-1",
+  filename: "transactions.sqlite",
+  source_format: "sqlite" as const,
+  file_size_bytes: 4096,
+  datasets: [{
+    dataset_id: "technical_transactions_table",
+    display_label: "technical_transactions_table",
+    row_count: 12068,
+    fields: [{ display_label: "transaction_timestamp", physical_type: "datetime" }],
+  }],
+  warnings: [],
+};
+
+const plan = {
+  analysis_id: "analysis-1",
+  time_range: { start: "2026-01-01T00:00:00Z", end: "2026-04-30T23:59:00Z" },
+  profiles: [
+    { profile: "client_risk" as const, state: "skipped" as const, comparison_mode: "not_applicable" as const },
+    { profile: "transaction_anomaly" as const, state: "planned" as const, comparison_mode: "historical" as const },
+  ],
+  warnings: [],
 };
 
 const summary: AnalysisSummary = {
@@ -105,8 +150,8 @@ function deferred<T>() {
 
 async function chooseAndUpload(user: ReturnType<typeof userEvent.setup>) {
   const file = new File(["signal;GB_flag\n9;1"], "clients.csv", { type: "text/csv" });
-  await user.upload(screen.getByLabelText("Выберите CSV файл"), file);
-  await user.click(screen.getByRole("button", { name: "Запустить анализ" }));
+  await user.upload(screen.getByLabelText("Выберите файл с данными"), file);
+  await user.click(screen.getByRole("button", { name: "Проверить источник" }));
 }
 
 describe("local analysis workspace", () => {
@@ -119,8 +164,16 @@ describe("local analysis workspace", () => {
       status: "queued",
       status_url: "/api/analyses/analysis-1/status",
     });
+    api.cancelAnalysis.mockResolvedValue({ analysis_id: "analysis-1", status: "cancelled" });
+    api.runAnalysis.mockResolvedValue({ analysis_id: "analysis-1", status: "queued" });
+    api.getAnalysisInventory.mockResolvedValue(inventory);
+    api.getAnalysisPlan.mockResolvedValue(plan);
+    api.updateAnalysisPeriod.mockResolvedValue(plan);
     api.getAnalysisSummary.mockResolvedValue(summary);
     api.getAnalysisResults.mockResolvedValue(resultPage);
+    api.getAnalysisClients.mockResolvedValue({ ...resultPage, items: resultPage.items });
+    api.getAnalysisTransactions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 });
+    api.getAnalysisRelationships.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 });
     api.getAnalysisDistribution.mockResolvedValue({
       analysis_id: "analysis-1",
       threshold: 0.5,
@@ -140,6 +193,50 @@ describe("local analysis workspace", () => {
 
   afterEach(cleanup);
 
+  it("shows a human-readable plan, applies the period and starts the model", async () => {
+    const user = userEvent.setup();
+    api.getAnalysisStatus
+      .mockResolvedValueOnce(plannedStatus)
+      .mockResolvedValueOnce(completeStatus);
+    render(<App />);
+
+    const file = new File(["SQLite format 3\0fixture"], "transactions.sqlite");
+    await user.upload(screen.getByLabelText("Выберите файл с данными"), file);
+    await user.click(screen.getByRole("button", { name: "Проверить источник" }));
+
+    expect(await screen.findByRole("heading", { name: "Источник распознан" })).toBeInTheDocument();
+    expect(screen.getByText("База SQLite")).toBeInTheDocument();
+    expect(screen.getByText("12 068")).toBeInTheDocument();
+    expect(screen.getByText("Подозрительные операции")).toBeInTheDocument();
+    expect(screen.queryByText("transaction_timestamp")).not.toBeInTheDocument();
+    expect(screen.queryByText("technical_transactions_table")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Запустить анализ" }));
+    await waitFor(() => {
+      expect(api.updateAnalysisPeriod).toHaveBeenCalledWith("analysis-1", {
+        start: "2026-01-01T00:00:00.000Z",
+        end: "2026-04-30T23:59:00.000Z",
+      });
+      expect(api.runAnalysis).toHaveBeenCalledWith("analysis-1");
+    });
+    expect(await screen.findByText("Карта риска выборки")).toBeInTheDocument();
+  });
+
+  it("cancels a prepared analysis and offers a clean restart", async () => {
+    const user = userEvent.setup();
+    api.getAnalysisStatus
+      .mockResolvedValueOnce(plannedStatus)
+      .mockResolvedValueOnce({ ...plannedStatus, status: "cancelled", stage: "cancelled", can_cancel: false });
+    render(<App />);
+    await chooseAndUpload(user);
+    await screen.findByRole("heading", { name: "Источник распознан" });
+
+    await user.click(screen.getByRole("button", { name: "Отменить" }));
+    expect(api.cancelAnalysis).toHaveBeenCalledWith("analysis-1");
+    expect(await screen.findByRole("heading", { name: "Расчёт остановлен" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Выбрать другой файл" })).toBeInTheDocument();
+  });
+
   it("shows upload progress, overview and keeps detailed analytics in their sections", async () => {
     const user = userEvent.setup();
     const status = deferred<AnalysisStatus>();
@@ -154,8 +251,8 @@ describe("local analysis workspace", () => {
     expect(await screen.findByText("Карта риска выборки")).toBeInTheDocument();
     expect(screen.getByText("Распределение риска")).toBeInTheDocument();
     expect(screen.getByText("Самые рискованные записи")).toBeInTheDocument();
-    expect(screen.getByText("row-critical")).toBeInTheDocument();
-    expect(screen.getByText("row-low")).toBeInTheDocument();
+    expect(screen.getAllByText("row-critical").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("row-low").length).toBeGreaterThanOrEqual(1);
 
     await user.click(screen.getByRole("link", { name: "Качество модели" }));
     expect(screen.getByText("ROC-AUC")).toBeInTheDocument();
@@ -165,7 +262,7 @@ describe("local analysis workspace", () => {
     expect(screen.getAllByText("Новые значения в поле «Пол»").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/Модель обработала их как неизвестные значения/).length).toBeGreaterThanOrEqual(1);
 
-    await user.click(screen.getByRole("link", { name: "Рискованные записи" }));
+    await user.click(screen.getByRole("link", { name: "Клиенты" }));
     expect(screen.getByText("Срок договора")).toBeInTheDocument();
 
     const critical = screen.getAllByText("90.0%").find((element) =>
@@ -189,7 +286,7 @@ describe("local analysis workspace", () => {
     render(<App />);
     await chooseAndUpload(user);
     await screen.findByText("Карта риска выборки");
-    await user.click(screen.getByRole("link", { name: "Рискованные записи" }));
+    await user.click(screen.getByRole("link", { name: "Клиенты" }));
 
     fireEvent.change(screen.getByRole("slider", { name: /Порог ручной проверки/ }), {
       target: { value: "80" },

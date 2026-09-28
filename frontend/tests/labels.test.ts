@@ -7,12 +7,12 @@ import {
 
 describe("front-end labels", () => {
   it("translates known and monthly model features", () => {
-    expect(getFeaturePresentation("EMPLOYMENTNATURE").label).toBe("Характер занятости");
+    expect(getFeaturePresentation("EMPLOYMENTNATURE").label).toBe("Вид деятельности");
     expect(getFeaturePresentation("MONTH_OVERDUE_C19").label).toBe(
-      "Просрочки — месяц 19",
+      "Макс. число просрочек · 20 мес. назад",
     );
     expect(getFeaturePresentation("MONTH_OVERDUE_A1").label).toBe(
-      "Сумма просрочки — месяц 1",
+      "Макс. просрочка · 2 мес. назад",
     );
   });
 
@@ -20,6 +20,16 @@ describe("front-end labels", () => {
     expect(getFeaturePresentation("NEW_SIGNAL").label).toBe("NEW_SIGNAL");
     expect(formatFeatureValue(null)).toBe("нет данных");
     expect(formatFeatureValue(12.3456)).toBe("12,346");
+  });
+
+  it("adds business units and identifies source category codes", () => {
+    expect(formatFeatureValue("28", "EMPLOYMENTNATURE")).toBe("Код 28");
+    expect(formatFeatureValue(0, "CNT_6M")).toBe("0 запросов за последние 6 мес.");
+    expect(formatFeatureValue(12_987_274, "MONTH_OVERDUE_A1")).toBe("Максимальная сумма просрочки: 12 987 274 ₸");
+    expect(formatFeatureValue(2, "MONTH_OVERDUE_C19")).toBe("Максимум: 2 просрочки");
+    expect(formatFeatureValue(2, "NUM_CONTRACT_BVU")).toBe("2 договора с БВУ");
+    expect(formatFeatureValue(2, "NUM_PHONENUMBERS")).toBe("2 телефонных номера");
+    expect(formatFeatureValue(1_917, "term")).toBe("Срок договора: 1 917 дней");
   });
 
   it("translates schema warnings without losing codes", () => {

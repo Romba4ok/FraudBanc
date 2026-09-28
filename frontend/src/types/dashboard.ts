@@ -9,6 +9,8 @@ export type DashboardRouteId =
   | "new-analysis"
   | "overview"
   | "risk-records"
+  | "transactions"
+  | "relationships"
   | "model-quality"
   | "data-quality";
 
@@ -35,7 +37,19 @@ export const DASHBOARD_ROUTES: readonly DashboardRouteDefinition[] = [
   {
     id: "risk-records",
     path: "/risk-records",
-    label: "Рискованные записи",
+    label: "Клиенты",
+    requiresCompletedAnalysis: true,
+  },
+  {
+    id: "transactions",
+    path: "/transactions",
+    label: "Операции",
+    requiresCompletedAnalysis: true,
+  },
+  {
+    id: "relationships",
+    path: "/relationships",
+    label: "Связи",
     requiresCompletedAnalysis: true,
   },
   {

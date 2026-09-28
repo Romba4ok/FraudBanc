@@ -18,12 +18,12 @@ export function FactorCard({ factor }: { factor: ExplanationFactor }) {
       <span className="factor-card__direction" aria-hidden="true">{increases ? "↑" : "↓"}</span>
       <div className="factor-card__identity">
         <span className="factor-list__label">{displayLabel}</span>
-        <code className="factor-list__code">{factor.feature}</code>
       </div>
-      <strong>{formatFeatureValue(factor.value)}</strong>
-      <small>{increases ? "Повышает риск" : "Снижает риск"}</small>
+      <strong className="factor-card__value">{formatFeatureValue(factor.value, factor.feature)}</strong>
+      <p className="factor-card__description">{feature.description}</p>
+      <small className="factor-card__risk-direction">{increases ? "Повышает риск" : "Снижает риск"}</small>
       <span className="factor-card__contribution">
-        Вклад SHAP <strong>{contribution.format(factor.contribution)}</strong>
+        Влияние на риск <strong>{contribution.format(factor.contribution)}</strong>
       </span>
     </li>
   );

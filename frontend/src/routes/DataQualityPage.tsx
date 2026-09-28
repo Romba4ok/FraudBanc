@@ -1,4 +1,5 @@
 import { QualityIssueCard } from "../components/QualityIssueCard";
+import { AnalystBrief } from "../components/AnalystBrief";
 import { parseQualityIssues } from "../utils/dataQuality";
 
 interface DataQualityPageProps {
@@ -31,6 +32,16 @@ export function DataQualityPage({ warnings, targetPresent, targetValid }: DataQu
         <h1>Качество данных</h1>
         <p>Отклонения показывают, чем CSV отличается от обучающей выборки. Допустимое предупреждение не останавливает анализ.</p>
       </header>
+
+      <AnalystBrief
+        title="Что требует внимания"
+        description="Предупреждения не всегда останавливают анализ, но могут влиять на надёжность отдельных оценок."
+        steps={[
+          { label: "Критичность", text: "Сначала изучите красные и жёлтые замечания" },
+          { label: "Заполненность", text: "Проверьте пропуски и новые значения" },
+          { label: "Источник", text: "Исправьте данные перед регулярным использованием" },
+        ]}
+      />
 
       <section className="data-quality-summary" aria-label="Сводка качества данных">
         <article className={`data-quality-stat data-quality-stat--${issues.length ? "warning" : "success"}`}>

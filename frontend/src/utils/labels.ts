@@ -35,8 +35,8 @@ const featureLabels: Record<string, FeaturePresentation> = {
     description: "Группа экономической деятельности",
   },
   EMPLOYMENTNATURE: {
-    label: "Характер занятости",
-    description: "Категория или характер занятости клиента",
+    label: "Вид деятельности",
+    description: "Код вида деятельности из справочника системы-источника; расшифровка кода в файле не передана",
   },
   DEPENDANTS_LT18: {
     label: "Иждивенцы до 18 лет",
@@ -69,16 +69,16 @@ const featureLabels: Record<string, FeaturePresentation> = {
     description: "Количество зарегистрированных использований",
   },
   CNT_1M: {
-    label: "Активность за 1 месяц",
-    description: "Счётчик событий или операций за последний месяц",
+    label: "Запросы за 1 месяц",
+    description: "Количество запросов по субъекту за последний месяц до расчётной даты",
   },
   CNT_3M: {
-    label: "Количество событий за 3 месяца",
-    description: "Счётчик событий или операций за последние 3 месяца",
+    label: "Запросы за 3 месяца",
+    description: "Количество запросов по субъекту за последние 3 месяца до расчётной даты",
   },
   CNT_6M: {
-    label: "Количество событий за 6 месяцев",
-    description: "Счётчик событий или операций за последние 6 месяцев",
+    label: "Запросы за 6 месяцев",
+    description: "Количество запросов по субъекту за последние 6 месяцев до расчётной даты",
   },
   MAX_PEAKS_OVERDUECOUNT_LAST_2Y: {
     label: "Максимум просрочек за 2 года",
@@ -200,9 +200,12 @@ export function getFeaturePresentation(feature: string): FeaturePresentation {
   if (overdue) {
     const [, kind, month] = overdue;
     const isCount = kind === "C";
+    const monthsAgo = Number(month) + 1;
     return {
-      label: `${isCount ? "Просрочки" : "Сумма просрочки"} — месяц ${month}`,
-      description: `${isCount ? "Количество просрочек" : "Сумма просроченной задолженности"} в месячном срезе ${month}`,
+      label: `${isCount ? "Макс. число просрочек" : "Макс. просрочка"} · ${monthsAgo} мес. назад`,
+      description: isCount
+        ? `Максимальное количество просроченных платежей по кредитам в срезе за ${monthsAgo}-й месяц до расчётной даты`
+        : `Максимальная сумма просрочки по кредитам в срезе за ${monthsAgo}-й месяц до расчётной даты; это не сумма всех платежей`,
     };
   }
 
@@ -212,8 +215,63 @@ export function getFeaturePresentation(feature: string): FeaturePresentation {
   };
 }
 
-export function formatFeatureValue(value: string | number | null): string {
+function numericValue(value: string | number | null): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s/g, "").replace(",", ".");
+  if (!normalized || !/^-?\d+(\.\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function plural(value: number, forms: [string, string, string]): string {
+  const absolute = Math.abs(Math.trunc(value));
+  if (absolute % 100 >= 11 && absolute % 100 <= 14) return forms[2];
+  if (absolute % 10 === 1) return forms[0];
+  if (absolute % 10 >= 2 && absolute % 10 <= 4) return forms[1];
+  return forms[2];
+}
+
+export function formatFeatureValue(
+  value: string | number | null,
+  feature?: string,
+): string {
   if (value === null || value === "") return "нет данных";
+  const numeric = numericValue(value);
+  if (feature === "EMPLOYMENTNATURE") return `Код ${String(value).trim()}`;
+  if (numeric !== null && /^CNT_(?:1M|3M|6M)$/.test(feature ?? "")) {
+    const formatted = new Intl.NumberFormat("ru-RU").format(numeric);
+    const period = feature === "CNT_1M" ? 1 : feature === "CNT_3M" ? 3 : 6;
+    return `${formatted} ${plural(numeric, ["запрос", "запроса", "запросов"])} за последние ${period} мес.`;
+  }
+  if (numeric !== null && /^MONTH_OVERDUE_A\d+$/.test(feature ?? "")) {
+    return `Максимальная сумма просрочки: ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(numeric)} ₸`;
+  }
+  if (numeric !== null && /^MONTH_OVERDUE_C\d+$/.test(feature ?? "")) {
+    const formatted = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(numeric);
+    return `Максимум: ${formatted} ${plural(numeric, ["просрочка", "просрочки", "просрочек"])}`;
+  }
+  if (numeric !== null && /^NUM_CONTRACT(?:S)?_(?:BVU|MFO|PDL|OTHERS|INS|NIN|FOR)$/.test(feature ?? "")) {
+    const formatted = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(numeric);
+    const suffix = feature === "NUM_CONTRACT_BVU" ? " с БВУ" : "";
+    return `${formatted} ${plural(numeric, ["договор", "договора", "договоров"])}${suffix}`;
+  }
+  if (numeric !== null && feature === "NUM_CONTRACTS") {
+    const formatted = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(numeric);
+    return `${formatted} ${plural(numeric, ["договор", "договора", "договоров"])}`;
+  }
+  if (numeric !== null && feature === "NUM_PHONENUMBERS") {
+    const formatted = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(numeric);
+    return `${formatted} ${plural(numeric, ["телефонный номер", "телефонных номера", "телефонных номеров"])}`;
+  }
+  if (numeric !== null && feature === "NUM_ADDRESSES") {
+    const formatted = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(numeric);
+    return `${formatted} ${plural(numeric, ["известный адрес", "известных адреса", "известных адресов"])}`;
+  }
+  if (numeric !== null && feature === "term") {
+    const formatted = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(numeric);
+    return `Срок договора: ${formatted} ${plural(numeric, ["день", "дня", "дней"])}`;
+  }
   if (typeof value === "number") {
     return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(value);
   }

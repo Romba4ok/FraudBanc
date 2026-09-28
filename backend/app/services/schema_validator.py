@@ -8,6 +8,7 @@ from app.core.config import (
     MISSING_CATEGORY,
 )
 from app.domain.models import ModelManifest, SchemaValidationResult
+from app.services.client_feature_schema import resolve_client_feature_sources
 from app.services.preprocessing import clean_text, ensure_binary_target, normalize_headers
 
 
@@ -16,17 +17,24 @@ def validate_schema(frame: pd.DataFrame, manifest: ModelManifest) -> SchemaValid
     result = SchemaValidationResult()
     available = set(normalized.columns)
     expected = set(manifest.feature_columns)
+    resolved = resolve_client_feature_sources(
+        normalized,
+        manifest.feature_columns,
+        manifest.feature_sources,
+    )
+    resolved_features = set(resolved)
+    used_source_columns = set(resolved.values())
 
     result.target_present = manifest.target_column in available
     result.extra_columns = sorted(
         available
-        - expected
+        - used_source_columns
         - {manifest.target_column}
         - set(manifest.identifier_columns)
     )
-    result.missing_features = sorted(expected - available)
+    result.missing_features = sorted(expected - resolved_features)
     result.missing_critical_features = sorted(
-        set(manifest.critical_features) - available
+        set(manifest.critical_features) - resolved_features
     )
 
     if result.missing_critical_features:
@@ -53,10 +61,11 @@ def validate_schema(frame: pd.DataFrame, manifest: ModelManifest) -> SchemaValid
 
     profiles = manifest.profile_map()
     for name in manifest.feature_columns:
-        if name not in normalized.columns:
+        source_name = resolved.get(name)
+        if source_name is None:
             continue
         profile = profiles[name]
-        missing_rate = float(clean_text(normalized[name]).isna().mean())
+        missing_rate = float(clean_text(normalized[source_name]).isna().mean())
         if missing_rate > profile.training_missing_rate + DRIFT_MISSING_RATE_DELTA:
             result.warnings.append(
                 f"Missing rate drift for {name}: {missing_rate:.1%} versus "
@@ -65,7 +74,9 @@ def validate_schema(frame: pd.DataFrame, manifest: ModelManifest) -> SchemaValid
 
         if profile.kind != "categorical" or not profile.categories:
             continue
-        values = set(clean_text(normalized[name]).dropna().astype(str).unique().tolist())
+        values = set(
+            clean_text(normalized[source_name]).dropna().astype(str).unique().tolist()
+        )
         unknown = sorted(values - set(profile.categories))
         if unknown:
             result.unknown_categories[name] = unknown[:20]

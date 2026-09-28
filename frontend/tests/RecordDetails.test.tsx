@@ -30,8 +30,9 @@ describe("RecordDetails", () => {
 
     await user.click(screen.getByRole("tab", { name: "Факторы риска" }));
     expect(screen.getByText("Технический признак")).toBeInTheDocument();
-    expect(screen.getByText("UNKNOWN_MODEL_FEATURE")).toBeInTheDocument();
+    expect(screen.queryByText("UNKNOWN_MODEL_FEATURE")).not.toBeInTheDocument();
     expect(screen.getByText("Снижает риск")).toBeInTheDocument();
+    expect(screen.getByText(/Влияние на риск/)).toBeInTheDocument();
     expect(screen.getByText("-0,1234")).toBeInTheDocument();
   });
 

@@ -46,12 +46,17 @@ def test_training_creates_loadable_versioned_artifacts(tmp_path: Path) -> None:
         "model.cbm",
         "manifest.json",
         "metrics.json",
+        "regression.json",
+        "shap_dictionary.json",
     }
     manifest = ModelManifest.load(output_path / "manifest.json")
     assert manifest.model_version == "test-1"
     assert manifest.random_seed == 17
     assert "GB_flag" not in manifest.feature_columns
-    assert "unused" in manifest.dropped_features
+    assert manifest.canonical_schema_version == "1.0"
+    assert "client.attributes.amount" in manifest.feature_columns
+    assert manifest.feature_sources["client.attributes.amount"][0] == "amount"
+    assert "client.attributes.unused" in manifest.dropped_features
     assert 0 < manifest.review_threshold < 1
     assert metrics["rows_train"] == 112
     assert metrics["rows_test"] == 48
@@ -76,6 +81,32 @@ def test_training_creates_loadable_versioned_artifacts(tmp_path: Path) -> None:
 
     serialized = json.loads((output_path / "metrics.json").read_text(encoding="utf-8"))
     assert serialized["model_version"] == "test-1"
+    assert serialized["regression"]["semantic_alias_equivalence"]["passed"]
+
+
+def test_semantically_renamed_fields_produce_equivalent_predictions(tmp_path: Path) -> None:
+    input_path = tmp_path / "train.csv"
+    output_path = tmp_path / "artifacts"
+    synthetic_training_frame().to_csv(input_path, sep=";", index=False)
+    train_model(input_path, output_path, iterations=8, random_seed=23)
+    model, manifest = load_artifacts(output_path)
+
+    original = synthetic_training_frame(12).drop(columns=["GB_flag"])
+    renamed = original.rename(
+        columns={
+            "term": "loan_term",
+            "GENDER": "sex",
+            "NUM_CONTRACTS": "contract_count",
+        }
+    )
+    original_probabilities = model.predict_proba(
+        transform_features(original, manifest)
+    )[:, 1]
+    renamed_probabilities = model.predict_proba(
+        transform_features(renamed, manifest)
+    )[:, 1]
+
+    assert (abs(original_probabilities - renamed_probabilities) <= 1e-12).all()
 
 
 def test_training_split_is_reproducible(tmp_path: Path) -> None:

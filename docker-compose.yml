@@ -9,6 +9,12 @@ services:
     init: true
     ports:
       - "127.0.0.1:8000:8000"
+    environment:
+      RISK_LEDGER_SESSION_DIR: /var/lib/risk-ledger/sessions
+      RISK_LEDGER_MODEL_REGISTRY_DIR: /var/lib/risk-ledger/model-registry
+    volumes:
+      - risk-ledger-data:/var/lib/risk-ledger
+      - ./backend/artifacts:/app/artifacts
     tmpfs:
       - /tmp:size=1g,mode=1777
     healthcheck:
@@ -41,3 +47,6 @@ services:
       start_period: 10s
       retries: 6
     restart: "no"
+
+volumes:
+  risk-ledger-data:

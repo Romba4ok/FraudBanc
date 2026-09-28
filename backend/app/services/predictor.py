@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -68,6 +69,8 @@ def predict_frame(
     threshold: float | None = None,
     warnings: list[str] | None = None,
     batch_size: int = PREDICTION_BATCH_SIZE,
+    cancel_check: Callable[[], None] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> PredictionBatch:
     if batch_size < 1:
         raise ValueError("batch_size must be positive.")
@@ -82,6 +85,8 @@ def predict_frame(
     probabilities: list[float] = []
 
     for start in range(0, len(normalized), batch_size):
+        if cancel_check is not None:
+            cancel_check()
         stop = min(start + batch_size, len(normalized))
         raw_batch = normalized.iloc[start:stop]
         features = transform_features(raw_batch, manifest)
@@ -114,6 +119,11 @@ def predict_frame(
             )
             rows.append(source)
             probabilities.append(probability)
+        if progress_callback is not None:
+            progress_callback(stop, len(normalized))
+
+    if cancel_check is not None:
+        cancel_check()
 
     return PredictionBatch(
         rows=rows,

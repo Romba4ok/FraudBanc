@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+import os
 
 
 TARGET_COLUMN = "GB_flag"
-MODEL_VERSION = "1.0.0"
+MODEL_VERSION = "2.0.0"
 DEFAULT_RANDOM_SEED = 42
 DEFAULT_TEST_SIZE = 0.30
 DEFAULT_ITERATIONS = 300
 
-MAX_INPUT_BYTES = 150 * 1024 * 1024
+MAX_INPUT_BYTES = 500 * 1024 * 1024
+MAX_INPUT_RECORDS = 1_000_000
 CHUNK_SIZE = 5_000
 PREDICTION_BATCH_SIZE = 2_000
 SHAP_FACTOR_COUNT = 5
@@ -65,4 +67,15 @@ ZERO_MISSING_COLUMNS = frozenset(
 )
 
 DEFAULT_ARTIFACT_DIR = Path(__file__).resolve().parents[2] / "artifacts" / "current"
-DEFAULT_SESSION_DIR = Path(tempfile.gettempdir()) / "bank-fraud-local-sessions"
+DEFAULT_TRANSACTION_ARTIFACT_DIR = (
+    Path(__file__).resolve().parents[2] / "artifacts" / "transaction" / "current"
+)
+DEFAULT_DICTIONARY_PATH = (
+    Path(__file__).resolve().parents[2] / "artifacts" / "semantic_dictionary.json"
+)
+DEFAULT_SESSION_DIR = Path(
+    os.getenv("RISK_LEDGER_SESSION_DIR", str(Path(tempfile.gettempdir()) / "bank-fraud-local-sessions"))
+)
+DEFAULT_MODEL_REGISTRY_DIR = Path(
+    os.getenv("RISK_LEDGER_MODEL_REGISTRY_DIR", str(Path(tempfile.gettempdir()) / "bank-fraud-model-registry"))
+)

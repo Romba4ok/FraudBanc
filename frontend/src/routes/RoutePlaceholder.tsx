@@ -3,6 +3,8 @@ import type { DashboardRouteId } from "../types/dashboard";
 
 const descriptions: Record<Exclude<DashboardRouteId, "new-analysis" | "overview">, string> = {
   "risk-records": "Таблица, графики, фильтры и подробная карточка будут подключены на этапе F005.",
+  transactions: "Список подозрительных операций доступен после анализа транзакционного профиля.",
+  relationships: "Граф связей доступен, когда модель распознала клиентов, счета или операции.",
   "model-quality": "Простой и экспертный режимы метрик будут подключены на этапе F007.",
   "data-quality": "Структурированная проверка качества будет подключена на этапе F008.",
 };

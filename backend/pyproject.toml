@@ -22,6 +22,7 @@ test = ["httpx>=0.28,<1", "pytest>=8,<10"]
 
 [project.scripts]
 bank-fraud-train = "app.training.train:main"
+bank-fraud-train-transactions = "app.training.train_transactions:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -16,10 +16,22 @@ from app.core.config import (
     ZERO_MISSING_PREFIXES,
 )
 from app.domain.models import FeatureProfile, ModelManifest
+from app.services.client_feature_schema import resolve_client_feature_sources
+from app.services.semantic_dictionary import normalize_field_name
 
 
 NUMERIC_INFERENCE_THRESHOLD = 0.95
 MAX_STORED_CATEGORIES = 500
+CANONICAL_CATEGORICAL_FEATURES = frozenset(
+    {
+        "client.gender",
+        "client.residency",
+        "client.education",
+        "client.marital_status",
+        "employment.nature",
+    }
+)
+CANONICAL_ZERO_MISSING_FEATURES = frozenset({"credit.contract_count"})
 
 
 def normalize_headers(frame: pd.DataFrame) -> pd.DataFrame:
@@ -39,7 +51,16 @@ def is_identifier_column(name: str) -> bool:
 
 
 def is_count_like(name: str) -> bool:
-    return name in ZERO_MISSING_COLUMNS or name.startswith(ZERO_MISSING_PREFIXES)
+    normalized = normalize_field_name(name).upper()
+    tail = normalized.rsplit("_", 1)[-1]
+    return (
+        name in CANONICAL_ZERO_MISSING_FEATURES
+        or
+        name in ZERO_MISSING_COLUMNS
+        or normalized in {item.upper() for item in ZERO_MISSING_COLUMNS}
+        or any(normalized.startswith(prefix) or f"_{prefix}" in normalized for prefix in ZERO_MISSING_PREFIXES)
+        or tail in {item.upper() for item in ZERO_MISSING_COLUMNS}
+    )
 
 
 def clean_text(series: pd.Series) -> pd.Series:
@@ -59,7 +80,13 @@ def _missing_rate(series: pd.Series) -> float:
 
 
 def _infer_kind(name: str, series: pd.Series) -> str:
-    if name in CATEGORICAL_FEATURES:
+    normalized = normalize_field_name(name)
+    categorical = {normalize_field_name(item) for item in CATEGORICAL_FEATURES}
+    if (
+        name in CANONICAL_CATEGORICAL_FEATURES
+        or normalized in categorical
+        or any(normalized.endswith(f"_{item}") for item in categorical)
+    ):
         return "categorical"
     non_missing = clean_text(series).dropna()
     if non_missing.empty:
@@ -159,11 +186,16 @@ def transform_features(frame: pd.DataFrame, manifest: ModelManifest) -> pd.DataF
     normalized = normalize_headers(frame)
     profiles = manifest.profile_map()
     transformed: dict[str, pd.Series] = {}
+    resolved = resolve_client_feature_sources(
+        normalized,
+        manifest.feature_columns,
+        manifest.feature_sources,
+    )
 
     for name in manifest.feature_columns:
         source = (
-            normalized[name]
-            if name in normalized.columns
+            normalized[resolved[name]]
+            if name in resolved
             else pd.Series(pd.NA, index=normalized.index, dtype="string")
         )
         profile = profiles[name]

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExportActions } from "../src/components/ExportActions";
 
-const api = vi.hoisted(() => ({ downloadAnalysisReport: vi.fn() }));
+const api = vi.hoisted(() => ({ downloadAnalysisReport: vi.fn(), downloadUniversalExport: vi.fn() }));
 
 vi.mock("../src/api/client", () => api);
 
@@ -14,12 +14,26 @@ describe("ExportActions", () => {
       blob: new Blob(["record_id,risk_probability\nrow-1,0.9"]),
       filename: "analysis-test.csv",
     });
+    api.downloadUniversalExport.mockResolvedValue({ blob: new Blob(["data"]), filename: "transactions.csv" });
     vi.stubGlobal("URL", {
       ...URL,
       createObjectURL: vi.fn(() => "blob:report"),
       revokeObjectURL: vi.fn(),
     });
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  });
+
+  it("keeps identifiers masked by default and requires confirmation to reveal them", async () => {
+    const user = userEvent.setup();
+    render(<ExportActions analysisId="analysis-test" reviewCount={2} threshold={0.5} />);
+    await user.click(screen.getByText("Другие варианты выгрузки"));
+    await user.selectOptions(screen.getByLabelText("Состав данных"), "relationships");
+    await user.click(screen.getByRole("button", { name: "Скачать выбранную выгрузку" }));
+    await waitFor(() => expect(api.downloadUniversalExport).toHaveBeenCalledWith("analysis-test", "relationships", true));
+    await user.click(screen.getByRole("checkbox", { name: "Включить исходные идентификаторы" }));
+    expect(screen.getByRole("dialog", { name: "Раскрыть идентификаторы?" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Раскрыть для выгрузки" }));
+    expect(screen.getByText(/файл будет содержать исходные идентификаторы/)).toBeInTheDocument();
   });
 
   afterEach(() => {

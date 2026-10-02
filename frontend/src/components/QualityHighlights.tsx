@@ -1,5 +1,6 @@
 import type { AnalysisSummary } from "../types/analysis";
 import type { DashboardRouteId } from "../types/dashboard";
+import { RouteIcon } from "./ui/icons";
 import { Badge } from "./ui/primitives";
 
 const percent = (value: number | null) =>
@@ -17,13 +18,12 @@ export function QualityHighlights({
     <div className="quality-highlights">
       <section className="overview-card quality-highlight">
         <div className="quality-highlight__topline">
-          <span className="quality-highlight__mark">◇</span>
+          <span className="quality-highlight__mark"><RouteIcon route="data-quality" /></span>
           <Badge tone={warningCount ? "warning" : "success"}>
             {warningCount ? `${warningCount} предупрежд.` : "Без отклонений"}
           </Badge>
         </div>
         <div>
-          <p className="eyebrow">Контроль входа</p>
           <h2>Качество данных</h2>
           <p>
             {warningCount
@@ -38,13 +38,12 @@ export function QualityHighlights({
 
       <section className="overview-card quality-highlight">
         <div className="quality-highlight__topline">
-          <span className="quality-highlight__mark">◎</span>
+          <span className="quality-highlight__mark"><RouteIcon route="model-quality" /></span>
           <Badge tone={summary.metrics.available ? "info" : "neutral"}>
             {summary.metrics.available ? "Метрики рассчитаны" : "Без факта"}
           </Badge>
         </div>
         <div>
-          <p className="eyebrow">Контроль модели</p>
           <h2>Качество модели</h2>
           {summary.metrics.available ? (
             <div className="quality-highlight__metrics">
@@ -52,7 +51,7 @@ export function QualityHighlights({
               <span>Полнота <strong>{percent(summary.metrics.recall)}</strong></span>
             </div>
           ) : (
-            <p>В CSV нет корректного <code>GB_flag</code>; оценка риска доступна, контрольные метрики — нет.</p>
+            <p>В источнике нет подтверждённого результата для сравнения; оценка риска доступна, контрольные метрики — нет.</p>
           )}
         </div>
         <button className="overview-link" type="button" onClick={() => onNavigate("model-quality")}>

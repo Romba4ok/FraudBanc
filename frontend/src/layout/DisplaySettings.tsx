@@ -15,6 +15,13 @@ export function DisplaySettings({ preferences, onChange }: DisplaySettingsProps)
     <details className="display-settings">
       <summary aria-label="Настройки отображения" role="button">Aa</summary>
       <div className="display-settings__panel">
+        <header className="display-settings__heading">
+          <span aria-hidden="true">Aa</span>
+          <div>
+            <strong>Вид интерфейса</strong>
+            <small>Настройте рабочее пространство под себя</small>
+          </div>
+        </header>
         <fieldset>
           <legend>Плотность</legend>
           <div className="settings-options">

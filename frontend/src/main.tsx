@@ -5,6 +5,7 @@ import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import "./styles/tokens.css";
 import "./styles/app.css";
 import "./styles/dashboard.css";
+import "./styles/dossier-redesign.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

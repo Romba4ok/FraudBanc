@@ -11,6 +11,7 @@ export function QualityIssueCard({ issue }: { issue: QualityIssue }) {
         <span className="quality-issue__level">{issueLevelLabel(issue.level)}</span>
         <h3>{issue.title}</h3>
         <p>{issue.description}</p>
+        <div className="quality-issue__action"><strong>Что сделать</strong><p>{issue.action}</p></div>
         {(issue.technicalCode || issue.items.length > 0) && (
           <details>
             <summary>Показать коды и значения</summary>

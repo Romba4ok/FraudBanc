@@ -22,6 +22,7 @@ from app.domain.contracts import (
 )
 from app.domain.models import ModelManifest
 from app.services.predictor import predict_frame, risk_level
+from app.services.csv_reader import iter_csv_chunks
 from app.services.schema_validator import validate_schema
 from app.services.transaction_rules import analyze_transaction_risk
 
@@ -75,11 +76,13 @@ class ProfileRunner(Protocol):
 
 @dataclass(slots=True)
 class ClientRiskProfileRunner:
-    frame: pd.DataFrame
+    frame: pd.DataFrame | None
     model: Any
     manifest: ModelManifest
     batch_size: int = 2_000
     warnings: tuple[str, ...] = ()
+    input_path: Path | None = None
+    total_records: int | None = None
     profile: AnalysisProfile = field(default=AnalysisProfile.CLIENT_RISK, init=False)
 
     def run(
@@ -89,30 +92,56 @@ class ClientRiskProfileRunner:
         report_progress: ProgressReporter,
     ) -> ProfileExecution:
         cancel_check()
-        validation = validate_schema(self.frame, self.manifest)
-        if not validation.is_compatible:
-            raise ValueError("; ".join(validation.errors))
-        all_warnings = tuple(dict.fromkeys((*self.warnings, *validation.warnings)))
-        prediction = predict_frame(
-            self.frame,
-            self.model,
-            self.manifest,
-            warnings=list(all_warnings),
-            batch_size=self.batch_size,
-            cancel_check=cancel_check,
-            progress_callback=lambda processed, total: report_progress(
-                AnalysisStage.CLIENT_SCORING, processed, total
-            ),
+        if self.frame is None and self.input_path is None:
+            raise ValueError("Client profile source is not configured.")
+
+        chunks = (
+            (self.frame,)
+            if self.frame is not None
+            else iter_csv_chunks(self.input_path, chunksize=self.batch_size)
         )
-        records = tuple(
-            sorted(
-                (dict(row) for row in prediction.rows),
-                key=lambda row: (-float(row["risk_probability"]), str(row["record_id"])),
+        records: list[dict[str, Any]] = []
+        processed = 0
+        collected_warnings = list(self.warnings)
+        validated = False
+        for chunk in chunks:
+            cancel_check()
+            if chunk.empty:
+                continue
+            if not validated:
+                validation = validate_schema(chunk, self.manifest)
+                if not validation.is_compatible:
+                    raise ValueError("; ".join(validation.errors))
+                collected_warnings.extend(validation.warnings)
+                validated = True
+            prediction = predict_frame(
+                chunk,
+                self.model,
+                self.manifest,
+                warnings=[],
+                batch_size=self.batch_size,
+                cancel_check=cancel_check,
+                record_id_offset=processed,
+                include_source_columns=self.frame is not None,
+                explain_review_only=self.frame is None,
+                attach_warnings=self.frame is not None,
             )
+            records.extend(prediction.rows)
+            processed += len(chunk)
+            report_progress(
+                AnalysisStage.CLIENT_SCORING,
+                processed,
+                self.total_records or (len(self.frame) if self.frame is not None else None),
+            )
+        if not validated:
+            raise ValueError("Client dataset contains no rows.")
+        all_warnings = tuple(dict.fromkeys(collected_warnings))
+        records.sort(
+            key=lambda row: (-float(row["risk_probability"]), str(row["record_id"]))
         )
         return ProfileExecution(
             profile=self.profile,
-            records=records,
+            records=tuple(records),
             model_version=self.manifest.model_version,
             warnings=all_warnings,
         )
@@ -596,8 +625,7 @@ class UniversalAnalysisOrchestrator:
         tuple[dict[str, Any], ...],
     ]:
         clients = tuple(
-            dict(item)
-            for item in executions.get(
+            executions.get(
                 AnalysisProfile.CLIENT_RISK,
                 ProfileExecution(AnalysisProfile.CLIENT_RISK, (), None),
             ).records

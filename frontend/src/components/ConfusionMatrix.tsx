@@ -35,6 +35,7 @@ export function ConfusionMatrix({ matrix }: { matrix: number[][] }) {
           <small>Верно: найден риск</small><strong>{tp}</strong><b>{percent(tp, fraudTotal)} факта 1</b><span>True Positive</span>
         </div>
       </div>
+      <div className="matrix-section__summary" aria-label="Вывод по ошибкам модели"><article className="is-warning"><strong>{fp}</strong><div><h4>Лишних проверок</h4><p>Честные записи получили сигнал тревоги. Это увеличивает нагрузку аналитиков.</p></div></article><article className="is-critical"><strong>{fn}</strong><div><h4>Рисков пропущено</h4><p>Подтверждённые мошеннические записи не получили тревогу. Это наиболее опасная ошибка.</p></div></article></div>
     </section>
   );
 }

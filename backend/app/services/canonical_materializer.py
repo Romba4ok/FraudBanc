@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from app.domain.contracts import (
     SourceFormat,
 )
 from app.services.adapter_registry import DEFAULT_SOURCE_ADAPTERS
+from app.services.semantic_dictionary import normalize_field_name
 
 
 TRANSACTION_COLUMNS = {
@@ -34,12 +36,61 @@ TRANSACTION_COLUMNS = {
     "transaction.fraud_label": "is_anomaly",
 }
 
+MODEL_SOURCE_ALIASES = {
+    "client.age_years": ("age", "age_years"),
+    "credit.requested_amount": ("total_amount_kzt", "requested_amount"),
+    "credit.term_days": ("term", "term_days"),
+    "employment.nature": ("employmentnature", "employment_nature"),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class MaterializedProfiles:
     client_frame: pd.DataFrame | None
+    client_path: Path | None
+    client_rows: int
     transaction_path: Path | None
     transaction_rows: int
+
+
+def _resolve_passthrough_sources(
+    source_fields: tuple[str, ...],
+    requested_fields: tuple[str, ...],
+) -> dict[str, str]:
+    """Match manifest fields to source columns without retaining the wide row.
+
+    Model manifests use namespaced names such as
+    ``credit.history.num_contract_bvu`` while historical CSV exports contain
+    ``NUM_CONTRACT_BVU``. The universal schema intentionally contains only the
+    stable cross-source subset, so model-specific fields need this deterministic
+    terminal-name bridge.
+    """
+    normalized_sources = {
+        normalize_field_name(source): source for source in source_fields
+    }
+    resolved: dict[str, str] = {}
+    for requested in requested_fields:
+        normalized_requested = normalize_field_name(requested)
+        exact = normalized_sources.get(normalized_requested)
+        if exact is not None:
+            resolved[requested] = exact
+            continue
+        for alias in MODEL_SOURCE_ALIASES.get(requested, ()):
+            source = normalized_sources.get(alias)
+            if source is not None:
+                resolved[requested] = source
+                break
+        if requested in resolved:
+            continue
+        candidates = [
+            (len(normalized), source)
+            for normalized, source in normalized_sources.items()
+            if len(normalized) >= 4
+            and normalized_requested.endswith(f"_{normalized}")
+        ]
+        if candidates:
+            resolved[requested] = max(candidates)[1]
+    return resolved
 
 
 def materialize_profiles(
@@ -51,6 +102,7 @@ def materialize_profiles(
     *,
     max_records: int,
     cancel_check,
+    client_passthrough_fields: tuple[str, ...] = (),
 ) -> MaterializedProfiles:
     adapter = DEFAULT_SOURCE_ADAPTERS.get(source_format)
     selected = {item.dataset_id: item.entity for item in plan.datasets}
@@ -59,7 +111,12 @@ def materialize_profiles(
         if item.status in {MappingStatus.APPLIED, MappingStatus.APPLIED_WITH_WARNING}:
             mappings.setdefault(item.lineage.source_dataset, []).append(item)
 
-    client_records: list[dict[str, Any]] = []
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    client_path = output / "canonical-clients.csv"
+    client_stream = None
+    client_writer = None
+    client_rows = 0
     transaction_records: list[dict[str, Any]] = []
     position = 0
     for batch in adapter.iter_batches(
@@ -85,6 +142,10 @@ def materialize_profiles(
             item.canonical_field.startswith(("transaction.", "account.", "counterparty."))
             for item in dataset_mappings
         )
+        passthrough_sources = _resolve_passthrough_sources(
+            tuple(batch.records[0]) if batch.records else (),
+            client_passthrough_fields,
+        )
         for raw in batch.records:
             position += 1
             canonical = {
@@ -92,9 +153,29 @@ def materialize_profiles(
                 for item in dataset_mappings
             }
             if has_client:
-                client = dict(raw)
-                client.update(canonical)
-                client_records.append(client)
+                # Keep the wide source off the Python heap. Large credit-history
+                # CSV files can have hundreds of columns; retaining every raw row
+                # as a dictionary multiplies their memory footprint several times.
+                # The model consumes canonical names directly, while target and
+                # identifier fields are explicitly preserved for metrics and IDs.
+                client = dict(canonical)
+                for field_name, source_name in passthrough_sources.items():
+                    if field_name not in client:
+                        client[field_name] = raw.get(source_name)
+                if client_writer is None:
+                    fieldnames = list(client)
+                    client_stream = client_path.open(
+                        "w", encoding="utf-8", newline=""
+                    )
+                    client_writer = csv.DictWriter(
+                        client_stream,
+                        fieldnames=fieldnames,
+                        extrasaction="ignore",
+                        lineterminator="\n",
+                    )
+                    client_writer.writeheader()
+                client_writer.writerow(client)
+                client_rows += 1
             if has_transactions:
                 transaction = {
                     target: canonical.get(source)
@@ -110,8 +191,10 @@ def materialize_profiles(
                         transaction[control] = raw[control]
                 transaction_records.append(transaction)
 
-    output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
+    if client_stream is not None:
+        client_stream.close()
+    if client_rows == 0:
+        client_path = None
     transaction_path: Path | None = None
     if transaction_records:
         frame = pd.DataFrame.from_records(transaction_records)
@@ -121,7 +204,9 @@ def materialize_profiles(
         transaction_path = output / "canonical-transactions.csv"
         frame.to_csv(transaction_path, index=False, encoding="utf-8", lineterminator="\n")
     return MaterializedProfiles(
-        client_frame=pd.DataFrame.from_records(client_records) if client_records else None,
+        client_frame=None,
+        client_path=client_path,
+        client_rows=client_rows,
         transaction_path=transaction_path,
         transaction_rows=len(transaction_records),
     )

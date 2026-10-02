@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { DisplaySettings } from "./DisplaySettings";
 import { SidebarNavigation } from "./SidebarNavigation";
 import { NotificationCenter } from "../components/NotificationCenter";
+import { SearchIcon } from "../components/ui/icons";
 import {
   DEFAULT_DASHBOARD_PREFERENCES,
   DASHBOARD_ROUTES,
@@ -104,12 +105,21 @@ export function DashboardShell({
             onClick={() => setMobileOpen((current) => !current)}
           >☰</button>
           <div>
-            <span className="dashboard-header__context">Risk Ledger</span>
+            <span className="dashboard-header__context">Рабочее пространство</span>
             <strong>{route.label}</strong>
           </div>
+          <label className="dashboard-search">
+            <SearchIcon />
+            <span className="sr-only">Поиск в текущем разделе</span>
+            <input aria-label="Поиск в текущем разделе" placeholder="Поиск по текущему разделу" type="search" />
+          </label>
           <div className="dashboard-header__tools">
             <NotificationCenter notifications={notifications} />
             <DisplaySettings preferences={preferences} onChange={setPreferences} />
+            <div className="dashboard-analyst" aria-label="Текущая роль: аналитик по рискам">
+              <span aria-hidden="true">АР</span>
+              <div><strong>Аналитик</strong><small>Риск-проверка</small></div>
+            </div>
           </div>
         </header>
         <main className="dashboard-content" id="main-content" tabIndex={-1}>{children}</main>

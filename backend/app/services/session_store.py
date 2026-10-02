@@ -195,6 +195,11 @@ class SessionStore:
                     for key, value in metadata.items()
                 ],
             )
+            insert_results = """
+                INSERT INTO results(
+                    row_position, record_id, risk_probability, risk_level, payload_json
+                ) VALUES (?, ?, ?, ?, ?)
+            """
             prepared = []
             for position, row in enumerate(rows):
                 probability = float(row["risk_probability"])
@@ -210,14 +215,11 @@ class SessionStore:
                         json.dumps(row, ensure_ascii=False, allow_nan=False),
                     )
                 )
-            connection.executemany(
-                """
-                INSERT INTO results(
-                    row_position, record_id, risk_probability, risk_level, payload_json
-                ) VALUES (?, ?, ?, ?, ?)
-                """,
-                prepared,
-            )
+                if len(prepared) >= 1_000:
+                    connection.executemany(insert_results, prepared)
+                    prepared.clear()
+            if prepared:
+                connection.executemany(insert_results, prepared)
             connection.commit()
         return session_id
 
@@ -234,7 +236,7 @@ class SessionStore:
         plan: dict[str, Any],
         threshold: float = 0.5,
     ) -> str:
-        clients = [self._json_safe(dict(item)) for item in client_records]
+        clients = list(client_records)
         transactions = [self._json_safe(dict(item)) for item in transaction_records]
         links = [self._json_safe(dict(item)) for item in relationships]
         legacy_rows = clients or transactions
@@ -254,6 +256,7 @@ class SessionStore:
         database = self._database_path(session_id)
         with self._connect(database) as connection:
             for profile, records in (("client_risk", clients), ("transaction_anomaly", transactions)):
+                insert_entities = "INSERT INTO entity_results(profile,row_position,record_id,risk_probability,risk_level,requires_review,payload_json) VALUES (?,?,?,?,?,?,?)"
                 prepared = []
                 for position, item in enumerate(records):
                     probability = float(item.get("risk_probability", 0.0))
@@ -267,25 +270,28 @@ class SessionStore:
                         int(bool(item.get("requires_review"))),
                         json.dumps(item, ensure_ascii=False, allow_nan=False),
                     ))
-                connection.executemany(
-                    "INSERT INTO entity_results(profile,row_position,record_id,risk_probability,risk_level,requires_review,payload_json) VALUES (?,?,?,?,?,?,?)",
-                    prepared,
-                )
-            connection.executemany(
-                "INSERT INTO relationships(row_position,relationship_id,kind,from_id,to_id,risk_probability,payload_json) VALUES (?,?,?,?,?,?,?)",
-                [
-                    (
-                        position,
-                        str(item["relationship_id"]),
-                        str(item["kind"]),
-                        str(item["from_id"]),
-                        str(item["to_id"]),
-                        float(item.get("risk_signal_score", 0.0)),
-                        json.dumps(item, ensure_ascii=False, allow_nan=False),
-                    )
-                    for position, item in enumerate(links)
-                ],
-            )
+                    if len(prepared) >= 1_000:
+                        connection.executemany(insert_entities, prepared)
+                        prepared.clear()
+                if prepared:
+                    connection.executemany(insert_entities, prepared)
+            insert_links = "INSERT INTO relationships(row_position,relationship_id,kind,from_id,to_id,risk_probability,payload_json) VALUES (?,?,?,?,?,?,?)"
+            prepared_links = []
+            for position, item in enumerate(links):
+                prepared_links.append((
+                    position,
+                    str(item["relationship_id"]),
+                    str(item["kind"]),
+                    str(item["from_id"]),
+                    str(item["to_id"]),
+                    float(item.get("risk_signal_score", 0.0)),
+                    json.dumps(item, ensure_ascii=False, allow_nan=False),
+                ))
+                if len(prepared_links) >= 1_000:
+                    connection.executemany(insert_links, prepared_links)
+                    prepared_links.clear()
+            if prepared_links:
+                connection.executemany(insert_links, prepared_links)
             for key, value in {
                 "universal_result": result,
                 "inventory": inventory,

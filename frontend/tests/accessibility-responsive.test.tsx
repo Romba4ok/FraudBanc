@@ -7,10 +7,57 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmationDialog } from "../src/components/ConfirmationDialog";
 import { DashboardShell } from "../src/layout/DashboardShell";
+import { DataQualityPage } from "../src/routes/DataQualityPage";
+import { ModelQualityPage } from "../src/routes/ModelQualityPage";
+import { RelationshipsPage } from "../src/routes/RelationshipsPage";
+import { TransactionsPage } from "../src/routes/TransactionsPage";
+import type { AnalysisMetrics, RelationshipRow, TransactionRow } from "../src/types/analysis";
+
+const auditMetrics: AnalysisMetrics = {
+  available: true,
+  threshold: 0.5,
+  gini: 0.82,
+  ks: 0.64,
+  accuracy: 0.91,
+  precision: 0.41,
+  recall: 0.833,
+  roc_auc: 0.91,
+  pr_auc: 0.76,
+  confusion_matrix: [[90, 10], [2, 10]],
+  unavailable_reason: null,
+};
+
+const auditTransaction: TransactionRow = {
+  record_id: "txn-a11y",
+  transaction_id: "txn-a11y",
+  client_id: "client-7",
+  sender_account_id: "account-a",
+  recipient_account_id: "account-b",
+  transaction_amount: 125000,
+  currency: "KZT",
+  transaction_timestamp: "2026-09-28T10:00:00Z",
+  risk_probability: 0.97,
+  risk_level: "critical",
+  requires_review: true,
+  explanation_factors: [],
+  analysis_warnings: [],
+  rule_explanation: "[]",
+};
+
+const auditRelationships: RelationshipRow[] = [{
+  relationship_id: "rel-a11y",
+  kind: "transfer",
+  from_type: "account",
+  from_id: "account-a",
+  to_type: "account",
+  to_id: "account-b",
+  transaction_id: "txn-a11y",
+  risk_signal_score: 0.97,
+}];
 
 afterEach(cleanup);
 
-describe("F010 accessibility and responsive contract", () => {
+describe("R009 accessibility and responsive contract", () => {
   beforeEach(() => window.localStorage.clear());
 
   it("has no critical or serious axe violations in the dashboard shell", async () => {
@@ -35,6 +82,32 @@ describe("F010 accessibility and responsive contract", () => {
     expect(blocking).toEqual([]);
   });
 
+  it("has no critical or serious axe violations on redesigned analytical pages", async () => {
+    const { container } = render(
+      <main>
+        <TransactionsPage rows={[auditTransaction]} total={1} />
+        <RelationshipsPage rows={auditRelationships} total={1} />
+        <ModelQualityPage metrics={auditMetrics} />
+        <DataQualityPage
+          targetPresent
+          targetValid
+          warnings={["Unknown categories in NEGATIVESTATUS: 116"]}
+        />
+      </main>,
+    );
+
+    const result = await axe.run(container, {
+      rules: {
+        // jsdom does not calculate rendered colours and contrast reliably.
+        "color-contrast": { enabled: false },
+      },
+    });
+    const blocking = result.violations.filter(({ impact }) =>
+      impact === "critical" || impact === "serious",
+    );
+    expect(blocking).toEqual([]);
+  });
+
   it("defines mobile, tablet, desktop and 200 percent safeguards", () => {
     const dashboardCss = readFileSync(
       resolve(process.cwd(), "src/styles/dashboard.css"),
@@ -42,6 +115,10 @@ describe("F010 accessibility and responsive contract", () => {
     );
     const tokensCss = readFileSync(
       resolve(process.cwd(), "src/styles/tokens.css"),
+      "utf8",
+    );
+    const redesignCss = readFileSync(
+      resolve(process.cwd(), "src/styles/dossier-redesign.css"),
       "utf8",
     );
 
@@ -57,6 +134,14 @@ describe("F010 accessibility and responsive contract", () => {
     expect(dashboardCss).toContain("min-height: 44px");
     expect(tokensCss).toContain("font-size: calc(16px * var(--text-scale))");
     expect(tokensCss).toContain("outline: 3px solid #38bdf8");
+    expect(tokensCss).toContain("color-scheme: light");
+    expect(redesignCss).toContain("R009 — adaptive, accessible release safeguards");
+    expect(redesignCss).toContain("@media (max-width: 899px)");
+    expect(redesignCss).toContain("@media (forced-colors: active)");
+    expect(redesignCss).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(redesignCss).toContain(".scale-200 .transaction-layout.has-selection");
+    expect(redesignCss).toContain("overflow-wrap: anywhere");
+    expect(redesignCss).toContain("overscroll-behavior-inline: contain");
   });
 
   it("starts keyboard navigation with a skip link and skips locked routes", async () => {
@@ -77,6 +162,8 @@ describe("F010 accessibility and responsive contract", () => {
     if (screen.getByRole("button", { name: "Открыть меню" }) === document.activeElement) {
       await user.tab();
     }
+    expect(screen.getByRole("searchbox", { name: "Поиск в текущем разделе" })).toHaveFocus();
+    await user.tab();
     expect(screen.getByRole("button", { name: /Уведомления текущей сессии/ })).toHaveFocus();
   });
 

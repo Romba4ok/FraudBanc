@@ -16,6 +16,7 @@ export interface QualityIssue {
   level: QualityIssueLevel;
   title: string;
   description: string;
+  action: string;
   items: string[];
   technicalCode?: string;
 }
@@ -30,6 +31,7 @@ export function parseQualityIssue(source: string, index = 0): QualityIssue {
       id: issueId(source, index), kind: "extra_columns", level: "info",
       title: "Дополнительные столбцы",
       description: "Они сохранены в итоговом CSV, но не участвуют в расчёте риска. Результат анализа остаётся действительным.",
+      action: "Убедитесь, что нужные для решения поля уже распознаны. Дополнительные столбцы можно оставить в источнике.",
       items: splitValues(extra[1]), technicalCode: "EXTRA_COLUMNS",
     };
   }
@@ -41,6 +43,7 @@ export function parseQualityIssue(source: string, index = 0): QualityIssue {
       id: issueId(source, index), kind: "unknown_categories", level: "warning",
       title: `Новые значения в поле «${getFeaturePresentation(feature).label}»`,
       description: "Таких категорий не было в обучающей выборке. Модель обработала их как неизвестные значения; рекомендуется проверить источник данных.",
+      action: "Сверьте эти значения со справочником банка и подтвердите, что формат и кодировка поля изменились намеренно.",
       items: splitValues(unknown[2]), technicalCode: feature,
     };
   }
@@ -51,6 +54,7 @@ export function parseQualityIssue(source: string, index = 0): QualityIssue {
       id: issueId(source, index), kind: "missing_features", level: "warning",
       title: "Отсутствуют необязательные признаки",
       description: "Анализ продолжен: модель автоматически заполнила отсутствующие поля. Для более устойчивого результата проверьте формирование CSV.",
+      action: "Восстановите поля в следующей выгрузке или подтвердите ответственному за источник допустимость их отсутствия.",
       items: splitValues(missing[1]), technicalCode: "OPTIONAL_FEATURES_IMPUTED",
     };
   }
@@ -62,6 +66,7 @@ export function parseQualityIssue(source: string, index = 0): QualityIssue {
       id: issueId(source, index), kind: "missing_rate", level: "warning",
       title: `Изменилась заполненность поля «${getFeaturePresentation(feature).label}»`,
       description: `В текущем CSV отсутствует ${drift[2]} значений, в обучающей выборке — ${drift[3]}. Это может снизить устойчивость оценки риска.`,
+      action: "Проверьте загрузку этого поля и сравните пропуски по подразделениям или периодам.",
       items: [], technicalCode: feature,
     };
   }
@@ -72,6 +77,7 @@ export function parseQualityIssue(source: string, index = 0): QualityIssue {
       id: issueId(source, index), kind: "target", level: "info",
       title: "Фактические метки не используются",
       description: "Риск рассчитан, но метрики качества модели недоступны: GB_flag должен содержать только значения 0 и 1.",
+      action: "Для проверки качества передайте подтверждённый результат в виде 0 или 1 и повторите анализ.",
       items: [], technicalCode: "GB_flag",
     };
   }
@@ -82,6 +88,7 @@ export function parseQualityIssue(source: string, index = 0): QualityIssue {
       id: issueId(source, index), kind: "incompatible", level: "critical",
       title: "Отсутствуют обязательные признаки",
       description: "Модель не может безопасно выполнить расчёт. Добавьте перечисленные столбцы и загрузите исправленный CSV.",
+      action: "Остановите использование результата, восстановите обязательные поля и выполните анализ повторно.",
       items: splitValues(critical[1]), technicalCode: "MISSING_CRITICAL_FEATURES",
     };
   }
@@ -92,6 +99,7 @@ export function parseQualityIssue(source: string, index = 0): QualityIssue {
       id: issueId(source, index), kind: "incompatible", level: "critical",
       title: "Слишком много отсутствующих признаков",
       description: `В файле отсутствует ${ratio[1]} признаков при допустимом уровне ${ratio[2]}. Проверьте структуру CSV и повторите анализ.`,
+      action: "Сопоставьте схему источника с планом анализа, восстановите недостающие данные и повторите загрузку.",
       items: [], technicalCode: "MISSING_FEATURE_RATIO",
     };
   }
@@ -100,6 +108,7 @@ export function parseQualityIssue(source: string, index = 0): QualityIssue {
     id: issueId(source, index), kind: "other", level: "info",
     title: "Техническое уведомление о данных",
     description: "Файл обработан, но локальный сервис сообщил дополнительную диагностическую информацию. При повторении проверьте структуру CSV.",
+    action: "Сохраните уведомление и передайте его специалисту по данным, если оно повторяется на следующей выгрузке.",
     items: [], technicalCode: "DATA_DIAGNOSTIC",
   };
 }

@@ -1,15 +1,6 @@
 import { DASHBOARD_ROUTES, isDashboardRouteAvailable } from "../types/dashboard";
 import type { DashboardRouteId, WorkspacePhase } from "../types/dashboard";
-
-const routeMarks: Record<DashboardRouteId, string> = {
-  "new-analysis": "+",
-  overview: "◫",
-  "risk-records": "↗",
-  transactions: "⇄",
-  relationships: "⌘",
-  "model-quality": "◎",
-  "data-quality": "◇",
-};
+import { BrandIcon, RouteIcon } from "../components/ui/icons";
 
 interface SidebarNavigationProps {
   activeRoute: DashboardRouteId;
@@ -57,8 +48,11 @@ export function SidebarNavigation({
             onCloseMobile();
           }}
         >
-          <span className="dashboard-brand__mark">RL</span>
-          <span className="dashboard-brand__name">Risk Ledger</span>
+          <span className="dashboard-brand__mark"><BrandIcon /></span>
+          <span className="dashboard-brand__copy">
+            <span className="dashboard-brand__name">Risk Ledger</span>
+            <span className="dashboard-brand__descriptor">Противодействие финансовым рискам</span>
+          </span>
         </a>
         <nav aria-label="Основная навигация">
           {DASHBOARD_ROUTES.map((route) => {
@@ -80,7 +74,7 @@ export function SidebarNavigation({
                 }}
               >
                 <span className="dashboard-nav__mark" aria-hidden="true">
-                  {routeMarks[route.id]}
+                  <RouteIcon route={route.id} />
                 </span>
                 <span className="dashboard-nav__label">{route.label}</span>
                 {!available && <span className="dashboard-nav__lock" aria-label="Раздел станет доступен после анализа">·</span>}
@@ -90,7 +84,7 @@ export function SidebarNavigation({
         </nav>
         <div className="dashboard-sidebar__footer">
           <span className="local-dot" aria-hidden="true" />
-          <span>Локальный режим</span>
+          <span><strong>Локальный режим</strong><small>Данные остаются в контуре банка</small></span>
         </div>
       </aside>
     </>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AnalysisPlan, SourceInventory } from "../types/analysis";
+import { CheckIcon, FileSearchIcon } from "./ui/icons";
 
 const formatLabels = {
   csv: "Табличный файл CSV",
@@ -67,15 +68,18 @@ export function AnalysisPlanPanel({ inventory, plan, busy, onRun }: AnalysisPlan
   return (
     <section className="analysis-plan" aria-labelledby="analysis-plan-title">
       <div className="analysis-plan__heading">
-        <div>
-          <p className="eyebrow">Проверка завершена</p>
-          <h2 id="analysis-plan-title">Источник распознан</h2>
-          <p className="muted">
-            Мы определили структуру и подготовили подходящие виды анализа. Технические
-            названия полей скрыты — проверьте только период и запустите расчёт.
-          </p>
+        <div className="analysis-plan__title">
+          <span className="workflow-step workflow-step--complete" aria-hidden="true"><CheckIcon /></span>
+          <div>
+            <span className="analysis-plan__stage">Источник проверен</span>
+            <h2 id="analysis-plan-title">План анализа готов</h2>
+            <p className="muted">
+              Система распознала структуру и выбрала подходящие проверки. Подтвердите
+              период и состав анализа перед запуском.
+            </p>
+          </div>
         </div>
-        <span className="analysis-plan__ready">Готово к запуску</span>
+        <span className="analysis-plan__ready"><CheckIcon /> Готово к запуску</span>
       </div>
 
       <div className="source-summary" aria-label="Сводка загруженного источника">
@@ -93,7 +97,7 @@ export function AnalysisPlanPanel({ inventory, plan, busy, onRun }: AnalysisPlan
             const active = profile.state === "planned";
             return (
               <article className={`profile-plan-card ${active ? "is-active" : "is-unavailable"}`} key={profile.profile}>
-                <span aria-hidden="true">{active ? "✓" : "—"}</span>
+                <span aria-hidden="true">{active ? <CheckIcon /> : <FileSearchIcon />}</span>
                 <div>
                   <strong>{copy.title}</strong>
                   <p>{active ? copy.description : "В этом источнике недостаточно подходящих данных."}</p>
@@ -124,7 +128,7 @@ export function AnalysisPlanPanel({ inventory, plan, busy, onRun }: AnalysisPlan
       )}
 
       <div className="analysis-plan__actions">
-        <p>{runnable.length > 0 ? `Будет запущено проверок: ${runnable.length}` : "Подходящие проверки не найдены."}</p>
+        <div><strong>{runnable.length > 0 ? `Проверок в плане: ${runnable.length}` : "Подходящие проверки не найдены"}</strong><span>Результат появится в разделах обзора, клиентов и операций.</span></div>
         <button
           className="button button--primary"
           disabled={busy || runnable.length === 0 || invalidPeriod}

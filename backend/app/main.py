@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import hmac
+import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app import __version__
 from app.api.routes import AnalysisManager, ApiError, router
@@ -43,6 +46,8 @@ def create_app(
     dictionary_path: str | Path | None = DEFAULT_DICTIONARY_PATH,
     transaction_artifact_dir: str | Path | None = DEFAULT_TRANSACTION_ARTIFACT_DIR,
     model_registry_dir: str | Path = DEFAULT_MODEL_REGISTRY_DIR,
+    static_dir: str | Path | None = None,
+    demo_password: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -126,6 +131,28 @@ def create_app(
     )
     app.include_router(router)
 
+    active_static_dir = static_dir or os.getenv("RISK_LEDGER_STATIC_DIR")
+    static_root = Path(active_static_dir).resolve() if active_static_dir else None
+    active_demo_password = demo_password or os.getenv("RISK_LEDGER_DEMO_PASSWORD")
+
+    if active_demo_password:
+        expected_token = base64.b64encode(
+            f"analyst:{active_demo_password}".encode("utf-8")
+        ).decode("ascii")
+
+        @app.middleware("http")
+        async def demo_basic_auth(request: Request, call_next):
+            if request.url.path == "/api/health":
+                return await call_next(request)
+            supplied = request.headers.get("Authorization", "")
+            expected = f"Basic {expected_token}"
+            if not hmac.compare_digest(supplied, expected):
+                return Response(
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Basic realm="Risk Ledger Demo"'},
+                )
+            return await call_next(request)
+
     @app.middleware("http")
     async def local_security_headers(request: Request, call_next):
         response = await call_next(request)
@@ -136,9 +163,16 @@ def create_app(
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=(), payment=()"
         )
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; frame-ancestors 'none'; sandbox"
-        )
+        if request.url.path.startswith("/api/"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; frame-ancestors 'none'; sandbox"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; connect-src 'self'; img-src 'self' data:; "
+                "style-src 'self'; script-src 'self'; font-src 'self'; "
+                "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+            )
         return response
 
     @app.exception_handler(ApiError)
@@ -171,6 +205,16 @@ def create_app(
                 }
             },
         )
+
+    if static_root is not None and (static_root / "index.html").is_file():
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_frontend(full_path: str) -> FileResponse:
+            candidate = (static_root / full_path).resolve()
+            inside_static = candidate == static_root or static_root in candidate.parents
+            if inside_static and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(static_root / "index.html")
 
     return app
 

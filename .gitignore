@@ -46,3 +46,8 @@ backend/.pytest-tmp/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local AI design tooling and generated previews
+.agents/
+.codex/
+.impeccable/

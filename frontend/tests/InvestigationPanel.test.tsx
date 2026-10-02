@@ -16,12 +16,12 @@ describe("investigation workflow", () => {
     api.updateInvestigation.mockResolvedValue({ analysis_id: "a", entity_id: "txn-1", status: "confirmed", comment: "Подтверждено документами", updated_at: 10, confirmed_label: { human_label: 1, source: "human_confirmed", profile: "transaction_anomaly", model_version: "1", risk_probability: .9, confirmed_at: 10 }, history: [{ event_id: 1, previous_status: "new", status: "confirmed", comment: "Подтверждено документами", occurred_at: 10 }] });
     render(<InvestigationPanel analysisId="a" entityId="txn-1" />);
     await screen.findByRole("button", { name: "Сохранить решение" });
-    await user.selectOptions(screen.getByLabelText("Статус"), "confirmed");
-    await user.type(screen.getByLabelText("Комментарий"), "Подтверждено документами");
+    await user.selectOptions(screen.getByLabelText("Статус решения"), "confirmed");
+    await user.type(screen.getByLabelText("Обоснование"), "Подтверждено документами");
     await user.click(screen.getByRole("button", { name: "Сохранить решение" }));
     await waitFor(() => expect(api.updateInvestigation).toHaveBeenCalledWith("a", "txn-1", { status: "confirmed", comment: "Подтверждено документами" }));
     expect(await screen.findByText(/метка сохранена обезличенно: мошенничество/)).toBeInTheDocument();
-    expect(screen.getByText("Журнал изменений (1)")).toBeInTheDocument();
+    expect(screen.getByText("Хронология решений (1)")).toBeInTheDocument();
   });
 
   it("masks an identifier until the user temporarily reveals it", async () => {

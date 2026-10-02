@@ -62,4 +62,13 @@ describe("ExportActions", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось подготовить CSV");
     expect(screen.getByRole("button", { name: "Только ручная проверка (2)" })).toBeEnabled();
   });
+
+  it("opens the printable management summary", async () => {
+    const user = userEvent.setup();
+    const print = vi.spyOn(window, "print").mockImplementation(() => undefined);
+    render(<ExportActions analysisId="analysis-test" reviewCount={2} threshold={0.5} />);
+
+    await user.click(screen.getByRole("button", { name: "Распечатать сводку" }));
+    expect(print).toHaveBeenCalledOnce();
+  });
 });

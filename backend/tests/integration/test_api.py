@@ -465,6 +465,7 @@ def test_startup_cleanup_and_missing_model_status(tmp_path: Path) -> None:
     unavailable = create_app(
         artifact_dir=tmp_path / "missing-artifacts",
         session_dir=tmp_path / "unavailable-sessions",
+        model_registry_dir=tmp_path / "unavailable-registry",
     )
     with TestClient(unavailable) as client:
         assert client.get("/api/health").json()["status"] == "degraded"

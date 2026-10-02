@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { CheckIcon, UploadIcon } from "./ui/icons";
 
 const MAX_FILE_BYTES = 500 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = [
@@ -51,14 +52,16 @@ export function UploadPanel({ disabled = false, onUpload }: UploadPanelProps) {
 
   return (
     <section className="upload-panel" aria-labelledby="upload-title">
-      <div>
-        <p className="eyebrow">Новый анализ</p>
-        <h2 id="upload-title">Передайте выборку модели</h2>
+      <header className="upload-panel__heading">
+        <span className="workflow-step" aria-hidden="true">1</span>
+        <div>
+        <span className="upload-panel__stage">Источник данных</span>
+        <h2 id="upload-title">Выберите файл для проверки</h2>
         <p className="muted">
-          CSV, JSON, SQL, SQLite или BSON до 500 МБ. Структура определяется
-          автоматически, данные остаются на этом компьютере.
+          Структуру, таблицы и назначение полей система определит автоматически.
         </p>
       </div>
+      </header>
       <div
         className={`drop-zone${file ? " drop-zone--selected" : ""}`}
         aria-describedby={validationError ? "upload-validation-error" : undefined}
@@ -87,10 +90,11 @@ export function UploadPanel({ disabled = false, onUpload }: UploadPanelProps) {
           onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
         />
         <span className="drop-zone__mark" aria-hidden="true">
-          {file ? fileExtension(file.name).slice(1).toUpperCase() : "DATA"}
+          {file ? <CheckIcon /> : <UploadIcon />}
         </span>
-        <strong>{file ? file.name : "Выберите файл с данными"}</strong>
-        <span>{file ? formatFileSize(file.size) : "или перетащите его сюда"}</span>
+        <strong>{file ? "Файл готов к проверке" : "Перетащите файл сюда"}</strong>
+        <span>{file ? file.name : "или выберите его на компьютере"}</span>
+        {file && <small>{fileExtension(file.name).slice(1).toUpperCase()} · {formatFileSize(file.size)}</small>}
         {file && (
           <button
             className="drop-zone__replace"
@@ -109,13 +113,14 @@ export function UploadPanel({ disabled = false, onUpload }: UploadPanelProps) {
         </p>
       )}
       <button
-        className="button button--primary"
+        className="button button--primary upload-panel__submit"
         disabled={!file || disabled}
         type="button"
         onClick={() => file && onUpload(file)}
       >
-        {disabled ? "Проверяем источник" : "Проверить источник"}
+        {disabled ? "Проверяем источник…" : "Проверить источник"}
       </button>
+      <p className="upload-panel__privacy">Файл обрабатывается в закрытом контуре и не передаётся во внешние сервисы.</p>
     </section>
   );
 }

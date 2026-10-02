@@ -1,3 +1,5 @@
+import { FileSearchIcon } from "./ui/icons";
+
 interface AnalystBriefProps {
   title: string;
   description: string;
@@ -8,7 +10,7 @@ export function AnalystBrief({ title, description, steps }: AnalystBriefProps) {
   return (
     <section className="analyst-brief" aria-label={title}>
       <div className="analyst-brief__intro">
-        <span aria-hidden="true">◎</span>
+        <span aria-hidden="true"><FileSearchIcon /></span>
         <div><strong>{title}</strong><p>{description}</p></div>
       </div>
       <ol>

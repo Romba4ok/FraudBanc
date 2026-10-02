@@ -1,4 +1,5 @@
 import type { AnalysisStatus } from "../types/analysis";
+import { CheckIcon, FileSearchIcon } from "./ui/icons";
 
 const stageLabels: Record<string, string> = {
   queued: "Ожидание обработки",
@@ -41,14 +42,19 @@ interface ProgressPanelProps {
 
 export function ProgressPanel({ status, cancelling = false, onCancel }: ProgressPanelProps) {
   const cancelled = status.status === "cancelled";
+  const stageLabel = stageLabels[status.stage] ?? "Обрабатываем источник";
   return (
     <section className="progress-panel" aria-live="polite" aria-label="Прогресс анализа">
       <div className="section-heading section-heading--inline">
-        <div>
-          <p className="eyebrow">Состояние модели</p>
-          <h2>{stageLabels[status.stage] ?? status.stage}</h2>
+        <div className="progress-panel__title">
+          <span className="workflow-step workflow-step--active" aria-hidden="true"><FileSearchIcon /></span>
+          <div>
+            <span className="progress-panel__stage">Текущий этап</span>
+            <h2>{stageLabel}</h2>
+            <p>{status.filename}</p>
+          </div>
         </div>
-        <strong className="progress-value">{status.progress}%</strong>
+        <div className="progress-panel__value"><strong className="progress-value">{status.progress}%</strong><span>выполнено</span></div>
       </div>
       <div
         aria-label={`Выполнено ${status.progress}%`}
@@ -60,16 +66,15 @@ export function ProgressPanel({ status, cancelling = false, onCancel }: Progress
       >
         <span style={{ width: `${status.progress}%` }} />
       </div>
-      <p className="muted">{status.filename}</p>
       <ol className="analysis-steps" aria-label="Этапы обработки">
         {steps.map((step, index) => {
           const complete = status.progress >= step.threshold;
           const previousThreshold = index === 0 ? 0 : steps[index - 1].threshold;
           const current = !complete && status.progress >= previousThreshold;
           return (
-            <li className={complete ? "is-complete" : current ? "is-current" : ""} key={step.label}>
-              <span aria-hidden="true">{complete ? "✓" : index + 1}</span>
-              {step.label}
+            <li aria-current={current ? "step" : undefined} className={complete ? "is-complete" : current ? "is-current" : ""} key={step.label}>
+              <span aria-hidden="true">{complete ? <CheckIcon /> : index + 1}</span>
+              <div><strong>{step.label}</strong><small>{complete ? "Готово" : current ? "Выполняется" : "Ожидает"}</small></div>
             </li>
           );
         })}

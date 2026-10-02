@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { ColumnPicker } from "../components/ColumnPicker";
-import { AnalystBrief } from "../components/AnalystBrief";
 import { RecordDetails } from "../components/RecordDetails";
 import { RiskDistributionCharts } from "../components/RiskDistributionCharts";
 import { RiskFilters } from "../components/RiskFilters";
@@ -85,23 +84,22 @@ export function RiskRecordsPage(props: RiskRecordsPageProps) {
   const clientIds = selected ? [selected.record_id, selected.client_id, selected.customer_id, selected.subject_id].filter(Boolean).map(String) : [];
   const related = (props.relatedTransactions ?? []).filter((transaction) => clientIds.includes(String(transaction.client_id ?? "")));
   const details = selected ? <RecordDetails key={selected.record_id} row={selected} analysisId={props.analysisId} relatedTransactions={related} onClose={closeDetails} /> : null;
+  const criticalCount = props.distribution?.risk_counts.critical ?? 0;
+  const highCount = props.distribution?.risk_counts.high ?? 0;
 
   return (
     <div className="section-page records-page">
       <header className="section-page__intro records-page__intro">
-        <div><p className="eyebrow">Клиентский профиль</p><h1>Рискованные клиенты</h1><p>Клиенты отсортированы сервером от наиболее подозрительных к наименее рискованным.</p></div>
-        <ColumnPicker visible={visibleColumns} onToggle={toggleColumn} />
+        <div><span className="records-page__section">Клиентский профиль</span><h1>Очередь проверки клиентов</h1><p>Начните сверху: записи уже отсортированы от максимального риска к минимальному.</p></div>
+        <div className="records-page__tools">
+          <div className="records-page__summary" aria-label="Краткая сводка очереди">
+            <span><strong>{props.total.toLocaleString("ru-RU")}</strong>в очереди</span>
+            <span className="is-critical"><strong>{criticalCount.toLocaleString("ru-RU")}</strong>критических</span>
+            <span className="is-warning"><strong>{highCount.toLocaleString("ru-RU")}</strong>высоких</span>
+          </div>
+          <ColumnPicker visible={visibleColumns} onToggle={toggleColumn} />
+        </div>
       </header>
-      <AnalystBrief
-        title="Как проверить клиента"
-        description="Список уже отсортирован по риску: двигайтесь сверху вниз и проверяйте объяснение модели."
-        steps={[
-          { label: "Риск", text: "Начните с критических клиентов" },
-          { label: "Факторы", text: "Сопоставьте причины с исходными данными" },
-          { label: "Решение", text: "Зафиксируйте итог ручной проверки" },
-        ]}
-      />
-      {props.distribution && <RiskDistributionCharts distribution={props.distribution} />}
       {props.errorMessage && <div className="inline-alert" role="alert">{props.errorMessage}</div>}
       <RiskFilters
         busy={props.busy}
@@ -125,6 +123,7 @@ export function RiskRecordsPage(props: RiskRecordsPageProps) {
       />
       <div className={`records-master-detail${selected ? " has-selection" : ""}`}>
         <RiskTable
+          busy={props.busy}
           page={props.page}
           pageSize={props.pageSize}
           rows={props.rows}
@@ -137,6 +136,12 @@ export function RiskRecordsPage(props: RiskRecordsPageProps) {
         />
         {desktopDetails && details}
       </div>
+      {props.distribution && (
+        <details className="records-analytics">
+          <summary>Распределение риска по всей выборке</summary>
+          <RiskDistributionCharts distribution={props.distribution} />
+        </details>
+      )}
     </div>
   );
 }

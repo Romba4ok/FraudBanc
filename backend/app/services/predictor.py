@@ -32,7 +32,7 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def _record_ids(frame: pd.DataFrame) -> list[str]:
+def _record_ids(frame: pd.DataFrame, *, offset: int = 0) -> list[str]:
     candidates = [
         name
         for name in frame.columns
@@ -43,7 +43,10 @@ def _record_ids(frame: pd.DataFrame) -> list[str]:
         if values.notna().all() and (values != "").all() and values.is_unique:
             return values.astype(str).tolist()
     width = max(6, len(str(max(len(frame), 1))))
-    return [f"row-{position:0{width}d}" for position in range(1, len(frame) + 1)]
+    return [
+        f"row-{position:0{width}d}"
+        for position in range(offset + 1, offset + len(frame) + 1)
+    ]
 
 
 def risk_level(probability: float, boundaries: dict[str, float]) -> RiskLevel:
@@ -71,6 +74,10 @@ def predict_frame(
     batch_size: int = PREDICTION_BATCH_SIZE,
     cancel_check: Callable[[], None] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    record_id_offset: int = 0,
+    include_source_columns: bool = True,
+    explain_review_only: bool = False,
+    attach_warnings: bool = True,
 ) -> PredictionBatch:
     if batch_size < 1:
         raise ValueError("batch_size must be positive.")
@@ -79,7 +86,7 @@ def predict_frame(
         raise ValueError("threshold must be between 0 and 1.")
 
     normalized = normalize_headers(frame).reset_index(drop=True)
-    record_ids = _record_ids(normalized)
+    record_ids = _record_ids(normalized, offset=record_id_offset)
     common_warnings = list(warnings or [])
     rows: list[dict[str, Any]] = []
     probabilities: list[float] = []
@@ -93,18 +100,34 @@ def predict_frame(
         batch_probabilities = np.asarray(model.predict_proba(features), dtype="float64")[:, 1]
         if not np.isfinite(batch_probabilities).all():
             raise ValueError("Model returned non-finite probabilities.")
-        explanations = explain_batch(model, features, manifest)
+        if explain_review_only:
+            explanations: list[list[Any]] = [[] for _ in range(len(features))]
+            selected = np.flatnonzero(batch_probabilities >= active_threshold)
+            if len(selected):
+                selected_explanations = explain_batch(
+                    model,
+                    features.iloc[selected],
+                    manifest,
+                )
+                for position, factors in zip(selected, selected_explanations, strict=True):
+                    explanations[int(position)] = factors
+        else:
+            explanations = explain_batch(model, features, manifest)
 
         for offset, probability_value in enumerate(batch_probabilities):
             absolute_position = start + offset
             probability = float(probability_value)
             if not 0 <= probability <= 1:
                 raise ValueError("Model returned a probability outside [0, 1].")
-            source = {
-                str(column): _json_value(value)
-                for column, value in raw_batch.iloc[offset].items()
-                if str(column) not in OUTPUT_COLUMNS and str(column) != "record_id"
-            }
+            source = (
+                {
+                    str(column): _json_value(value)
+                    for column, value in raw_batch.iloc[offset].items()
+                    if str(column) not in OUTPUT_COLUMNS and str(column) != "record_id"
+                }
+                if include_source_columns
+                else {}
+            )
             source.update(
                 {
                     "record_id": record_ids[absolute_position],
@@ -114,7 +137,7 @@ def predict_frame(
                     "explanation_factors": [
                         asdict(factor) for factor in explanations[offset]
                     ],
-                    "analysis_warnings": common_warnings.copy(),
+                    "analysis_warnings": common_warnings.copy() if attach_warnings else [],
                 }
             )
             rows.append(source)

@@ -398,15 +398,30 @@ class AnalysisManager:
                 job.upload_path.parent,
                 max_records=self.max_input_records,
                 cancel_check=token.raise_if_cancelled,
+                client_passthrough_fields=tuple(
+                    dict.fromkeys(
+                        (
+                            self.manifest.target_column,
+                            *self.manifest.feature_columns,
+                            *self.manifest.identifier_columns,
+                            "record_id",
+                            "client_id",
+                            "customer_id",
+                            "subject_id",
+                        )
+                    )
+                ),
             )
             runners: dict[Any, Any] = {}
-            if materialized.client_frame is not None:
+            if materialized.client_frame is not None or materialized.client_path is not None:
                 from app.domain.canonical_schema import AnalysisProfile
 
                 runners[AnalysisProfile.CLIENT_RISK] = ClientRiskProfileRunner(
                     materialized.client_frame,
                     self.model,
                     self.manifest,
+                    input_path=materialized.client_path,
+                    total_records=materialized.client_rows,
                 )
             if materialized.transaction_path is not None and self.transaction_artifact_dir is not None:
                 from app.domain.canonical_schema import AnalysisProfile

@@ -37,6 +37,15 @@ const relationships: RelationshipRow[] = [{
   to_id: "account-b",
   transaction_id: "txn-1",
   risk_signal_score: .97,
+}, {
+  relationship_id: "rel-2",
+  kind: "transaction_client",
+  from_type: "account",
+  from_id: "account-b",
+  to_type: "client",
+  to_id: "client-7",
+  transaction_id: "txn-1",
+  risk_signal_score: .76,
 }];
 
 afterEach(cleanup);
@@ -47,21 +56,32 @@ describe("universal risk pages", () => {
     render(<TransactionsPage rows={[transaction("txn-1", .97), transaction("txn-2", .82)]} total={2} />);
     const table = screen.getByRole("table", { name: "Операции по убыванию риска" });
     expect(within(table).getAllByRole("row")[1]).toHaveTextContent("txn-1");
-    await user.click(within(table).getAllByRole("button", { name: "Открыть" })[0]);
+    await user.click(within(table).getAllByRole("button", { name: /Открыть досье/ })[0]);
     const card = screen.getByRole("complementary", { name: "txn-1" });
     expect(card).toHaveTextContent("Операция по счёту без активности в доступной истории");
     expect(card).toHaveTextContent("История: 97 дней");
     expect(card).toHaveTextContent("Предыдущих операций: 0");
     expect(card).toHaveTextContent("Сильный фактор");
+    expect(card).toHaveTextContent("Клиент, счета и контрагент");
+    expect(card).toHaveTextContent("Что проверить по порядку");
     expect(card).not.toHaveTextContent("dormant_account");
     expect(card).not.toHaveTextContent("engine_version");
   });
 
-  it("offers a table as an accessible alternative to the relationship graph", async () => {
+  it("synchronizes an accessible graph, priority list, dossier and table", async () => {
     const user = userEvent.setup();
-    render(<RelationshipsPage rows={relationships} total={1} />);
+    render(<RelationshipsPage rows={relationships} total={2} />);
     expect(screen.getByText("Наиболее рискованные связи")).toBeInTheDocument();
+    expect(screen.getByLabelText("Легенда графа")).toHaveTextContent("Толще линия — сильнее сигнал");
+    const sharedAccount = screen.getByRole("button", { name: /Выбрать объект Счёт .*nt-b/ });
+    sharedAccount.focus();
+    await user.keyboard("{Enter}");
+    const dossier = screen.getByRole("complementary", { name: "Перевод между счетами" });
+    expect(dossier).toHaveTextContent("Связей выбранного объекта2");
+    expect(screen.getByRole("button", { name: "Открыть связь rel-1" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("tab", { name: "Таблица" }));
-    expect(screen.getByRole("table", { name: "Табличное представление связей" })).toHaveTextContent("Перевод между счетами");
+    const table = screen.getByRole("table", { name: "Табличное представление связей" });
+    expect(table).toHaveTextContent("Перевод между счетами");
+    expect(within(table).getAllByRole("button", { name: /Открыть связь/ })).toHaveLength(2);
   });
 });

@@ -67,6 +67,9 @@ export function ExportActions({ analysisId, reviewCount, threshold }: ExportActi
         <button className="ui-button ui-button--secondary" disabled={active !== null || reviewCount === 0} type="button" onClick={() => { void download("review"); }}>
           {active === "review" ? <><span className="ui-spinner" aria-hidden="true" /> Подготовка…</> : `Только ручная проверка (${reviewCount})`}
         </button>
+        <button className="ui-button ui-button--ghost export-actions__print" disabled={active !== null} type="button" onClick={() => window.print()}>
+          Распечатать сводку
+        </button>
       </div>
       <small>Выгрузка учитывает порог {(threshold * 100).toFixed(0)}% и содержит полный набор разрешённых полей.</small>
       <details className="export-options">

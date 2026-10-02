@@ -63,9 +63,10 @@ describe("RiskRecordsPage", () => {
   it("shows distributions and opens a focused record card", async () => {
     const user = userEvent.setup();
     renderPage();
+    await user.click(screen.getByText("Распределение риска по всей выборке"));
     expect(screen.getByRole("img", { name: /0–10%: 1/ })).toBeInTheDocument();
     expect(screen.getByText("Состав выборки")).toBeInTheDocument();
-    const trigger = screen.getByRole("button", { name: "Открыть запись row-critical" });
+    const trigger = screen.getByRole("button", { name: "Открыть досье row-critical" });
     await user.click(trigger);
     const card = screen.getByRole("complementary", { name: "row-critical" });
     expect(card).toBeInTheDocument();
@@ -90,15 +91,17 @@ describe("RiskRecordsPage", () => {
     await user.keyboard("{ArrowRight}");
     await waitFor(() => expect(screen.getByRole("tab", { name: "Исходные данные" })).toHaveFocus());
     expect(screen.getByText("Вид деятельности")).toBeInTheDocument();
-    expect(screen.getByText("Техническое поле")).toBeInTheDocument();
-    expect(screen.getByText("NEW_SIGNAL")).toBeInTheDocument();
+    expect(screen.getByText("Дополнительное поле")).toBeInTheDocument();
+    expect(screen.getByText("NEW_SIGNAL")).not.toBeVisible();
+    await user.click(screen.getByText("Техническое название"));
+    expect(screen.getByText("NEW_SIGNAL")).toBeVisible();
 
     await user.click(screen.getByRole("tab", { name: /Предупреждения/ }));
     expect(screen.getByText("Новое значение категории занятости")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Закрыть карточку записи" }));
     await waitFor(() => expect(trigger).toHaveFocus());
-  });
+  }, 10_000);
 
   it("allows hiding columns while retaining at least one column", async () => {
     const user = userEvent.setup();

@@ -5,10 +5,10 @@ const levelDefinitions: Array<{
   label: string;
   color: string;
 }> = [
-  { level: "critical", label: "Критический", color: "#fb7185" },
-  { level: "high", label: "Высокий", color: "#fb923c" },
-  { level: "medium", label: "Средний", color: "#fbbf24" },
-  { level: "low", label: "Низкий", color: "#34d399" },
+  { level: "critical", label: "Критический", color: "#b42335" },
+  { level: "high", label: "Высокий", color: "#d47a17" },
+  { level: "medium", label: "Средний", color: "#d4aa4d" },
+  { level: "low", label: "Низкий", color: "#23856d" },
 ];
 
 const number = new Intl.NumberFormat("ru-RU");
@@ -28,13 +28,15 @@ export function RiskDonutChart({
   const chartLabel = levelDefinitions
     .map(({ level, label }) => `${label}: ${number.format(counts[level])}`)
     .join("; ");
+  const priorityCount = counts.critical + counts.high;
+  const priorityShare = total ? (priorityCount / total) * 100 : 0;
 
   return (
     <section className="overview-card risk-distribution" aria-labelledby="risk-distribution-title">
       <div className="overview-card__heading">
         <div>
-          <p className="eyebrow">Структура выборки</p>
           <h2 id="risk-distribution-title">Распределение риска</h2>
+          <p>Соотношение записей по уровню приоритета проверки.</p>
         </div>
       </div>
       <div className="risk-distribution__body">
@@ -63,6 +65,9 @@ export function RiskDonutChart({
           })}
         </ul>
       </div>
+      <p className="risk-distribution__insight">
+        <strong>{priorityShare.toFixed(1)}%</strong> выборки относится к высокому или критическому риску — {number.format(priorityCount)} записей.
+      </p>
     </section>
   );
 }

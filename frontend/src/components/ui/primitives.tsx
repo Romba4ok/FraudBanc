@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { useId, useState } from "react";
+import { EmptyStateIcon } from "./icons";
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info";
 
@@ -105,7 +106,7 @@ export function EmptyState({
 }) {
   return (
     <div className="ui-state ui-state--empty">
-      <span className="ui-state__mark" aria-hidden="true">◇</span>
+      <span className="ui-state__mark" aria-hidden="true"><EmptyStateIcon /></span>
       <h2>{title}</h2>
       <p>{description}</p>
       {action}

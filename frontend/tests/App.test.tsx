@@ -204,7 +204,7 @@ describe("local analysis workspace", () => {
     await user.upload(screen.getByLabelText("Выберите файл с данными"), file);
     await user.click(screen.getByRole("button", { name: "Проверить источник" }));
 
-    expect(await screen.findByRole("heading", { name: "Источник распознан" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "План анализа готов" })).toBeInTheDocument();
     expect(screen.getByText("База SQLite")).toBeInTheDocument();
     expect(screen.getByText("12 068")).toBeInTheDocument();
     expect(screen.getByText("Подозрительные операции")).toBeInTheDocument();
@@ -229,7 +229,7 @@ describe("local analysis workspace", () => {
       .mockResolvedValueOnce({ ...plannedStatus, status: "cancelled", stage: "cancelled", can_cancel: false });
     render(<App />);
     await chooseAndUpload(user);
-    await screen.findByRole("heading", { name: "Источник распознан" });
+    await screen.findByRole("heading", { name: "План анализа готов" });
 
     await user.click(screen.getByRole("button", { name: "Отменить" }));
     expect(api.cancelAnalysis).toHaveBeenCalledWith("analysis-1");

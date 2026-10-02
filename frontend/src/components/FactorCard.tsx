@@ -1,5 +1,6 @@
 import type { ExplanationFactor } from "../types/analysis";
 import { formatFeatureValue, getFeaturePresentation } from "../utils/labels";
+import { TrendArrowIcon } from "./ui/icons";
 
 const contribution = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 4,
@@ -15,7 +16,7 @@ export function FactorCard({ factor }: { factor: ExplanationFactor }) {
       className={`factor-card ${increases ? "factor-card--up" : "factor-card--down"}`}
       title={feature.description}
     >
-      <span className="factor-card__direction" aria-hidden="true">{increases ? "↑" : "↓"}</span>
+      <span className="factor-card__direction" aria-hidden="true"><TrendArrowIcon /></span>
       <div className="factor-card__identity">
         <span className="factor-list__label">{displayLabel}</span>
       </div>

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { AnalysisRow, RiskLevel } from "../types/analysis";
 import { getFeaturePresentation } from "../utils/labels";
 import { FactorCard } from "./FactorCard";
+import { CopyIcon } from "./ui/icons";
 
 const riskLabels: Record<RiskLevel, string> = {
   critical: "Критический риск",
@@ -18,6 +19,7 @@ interface RiskTableProps {
   page: number;
   pageSize: number;
   total: number;
+  busy?: boolean;
   visibleColumns?: Set<RiskTableColumn>;
   selectedRecordId?: string | null;
   selectedDetails?: ReactNode;
@@ -30,6 +32,7 @@ export function RiskTable({
   page,
   pageSize,
   total,
+  busy = false,
   visibleColumns = new Set<RiskTableColumn>(["record", "probability", "level", "decision", "factors"]),
   selectedRecordId = null,
   selectedDetails,
@@ -59,7 +62,7 @@ export function RiskTable({
   };
 
   return (
-    <section className="results-panel" aria-labelledby="results-title" ref={sectionRef}>
+    <section className="results-panel" aria-busy={busy} aria-labelledby="results-title" ref={sectionRef}>
       <div className="section-heading section-heading--inline">
         <div>
           <p className="eyebrow">Приоритет проверки</p>
@@ -69,6 +72,7 @@ export function RiskTable({
           {total ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} из ${total}` : "0 записей"}
         </span>
       </div>
+      {busy && <div className="results-refresh" role="status"><span className="ui-spinner" aria-hidden="true" />Обновляем очередь проверки…</div>}
       <div className="table-scroll">
         <table>
           <thead>
@@ -87,8 +91,8 @@ export function RiskTable({
               const riskPercent = row.risk_probability * 100;
               return (
                 <Fragment key={row.record_id}>
-                  <tr className={`risk-row risk-row--${row.risk_level}${selectedRecordId === row.record_id ? " is-selected" : ""}`}>
-                    {visibleColumns.has("record") && <td data-label="Запись"><div className="record-cell"><code className="record-id" title={row.record_id}>{row.record_id}</code><button aria-label={`Копировать ${row.record_id}`} type="button" onClick={() => { void navigator.clipboard?.writeText(row.record_id); }}>⧉</button></div></td>}
+                  <tr aria-selected={selectedRecordId === row.record_id} className={`risk-row risk-row--${row.risk_level}${selectedRecordId === row.record_id ? " is-selected" : ""}`}>
+                    {visibleColumns.has("record") && <td data-label="Запись"><div className="record-cell"><code className="record-id" title={row.record_id}>{row.record_id}</code><button aria-label={`Копировать ${row.record_id}`} title="Копировать идентификатор" type="button" onClick={() => { void navigator.clipboard?.writeText(row.record_id); }}><CopyIcon /></button></div></td>}
                     {visibleColumns.has("probability") && <td data-label="Вероятность">
                       <div className="risk-probability">
                         <strong className="risk-score">{riskPercent.toFixed(1)}%</strong>
@@ -131,7 +135,7 @@ export function RiskTable({
                         </button>
                       </div>
                     </td>}
-                    <td className="row-action"><button aria-label={`Открыть запись ${row.record_id}`} type="button" onClick={(event) => onSelect?.(row, event.currentTarget)}>Открыть</button></td>
+                    <td className="row-action"><button aria-label={`Открыть досье ${row.record_id}`} type="button" onClick={(event) => onSelect?.(row, event.currentTarget)}>Открыть досье</button></td>
                   </tr>
                   {selectedRecordId === row.record_id && selectedDetails && (
                     <tr className="record-details-row">
@@ -158,7 +162,7 @@ export function RiskTable({
             })}
             {!rows.length && (
               <tr>
-                <td className="empty-table" colSpan={visibleCount}>Нет записей для выбранного фильтра. Сбросьте фильтры, чтобы увидеть всю выборку.</td>
+                <td className="empty-table" colSpan={visibleCount}><strong>По выбранным условиям записей нет</strong><span>Измените или сбросьте фильтры, чтобы вернуться ко всей очереди.</span></td>
               </tr>
             )}
           </tbody>

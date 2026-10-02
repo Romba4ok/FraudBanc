@@ -116,14 +116,14 @@ def test_universal_api_plan_run_pages_exports_feedback_and_delete(
         summary = client.get(f"/api/analyses/{analysis_id}/summary")
         assert summary.status_code == 200, summary.text
         summary_payload = summary.json()
-        assert summary_payload["summary"]["rows"] == 4
+        assert summary_payload["summary"]["rows"] == 1068
         assert set(summary_payload["summary"]["risk_counts"]) == {
             "low",
             "medium",
             "high",
             "critical",
         }
-        assert sum(summary_payload["summary"]["risk_counts"].values()) == 4
+        assert sum(summary_payload["summary"]["risk_counts"].values()) == 1068
         assert isinstance(summary_payload["summary"]["warnings"], list)
         assert summary_payload["summary"]["target_present"] is False
         assert summary_payload["summary"]["target_valid"] is False

@@ -306,6 +306,17 @@ class SemanticSchemaMapper:
                 else 0.8
             )
             return base, ["Имя найдено в локальном словаре синонимов"]
+        # Wide banking extracts commonly keep the business column name while
+        # the model manifest namespaces it (for example NUM_CONTRACT_BVU ->
+        # credit.history.num_contract_bvu). Treat an exact terminal-name match
+        # as a strong deterministic mapping. Generic names stay subject to the
+        # existing ambiguity rules above/below.
+        if (
+            source not in _GENERIC_ALIASES
+            and len(source) >= 4
+            and canonical.endswith(f"_{source}")
+        ):
+            return 0.74, ["Имя совпадает с бизнес-частью канонического поля"]
         if candidate:
             return 0.52, ["Найдено кандидатное правило локального словаря"]
         source_tokens = set(source.split("_"))

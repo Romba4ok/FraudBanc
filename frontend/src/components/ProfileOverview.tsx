@@ -32,11 +32,11 @@ export function ProfileOverview(props: ProfileOverviewProps) {
   ];
   return (
     <section className="profile-overview" aria-labelledby="profiles-title">
-      <div className="section-heading"><div><p className="eyebrow">Два профиля анализа</p><h2 id="profiles-title">Что требует внимания в первую очередь</h2></div></div>
+      <div className="section-heading"><div><h2 id="profiles-title">Рабочие очереди</h2><p>Перейдите к клиентам или операциям, требующим первоочередного разбора.</p></div></div>
       <div className="profile-overview__grid">
         {cards.map((card) => (
           <article className="profile-overview__card" key={card.title}>
-            <header><div><h3>{card.title}</h3><p>{card.total.toLocaleString("ru-RU")} найдено</p></div><button type="button" onClick={() => props.onNavigate(card.route)}>Открыть все</button></header>
+            <header><div><h3>{card.title}</h3><p>{card.total.toLocaleString("ru-RU")} найдено</p></div><button type="button" onClick={() => props.onNavigate(card.route)}>Открыть очередь</button></header>
             <ProfileList rows={card.rows} kind={card.kind} />
           </article>
         ))}

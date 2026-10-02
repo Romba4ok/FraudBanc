@@ -1,4 +1,5 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { ModelQualityPage } from "../src/routes/ModelQualityPage";
 import type { AnalysisMetrics } from "../src/types/analysis";
@@ -24,6 +25,15 @@ function renderPage(mode: "simple" | "expert" = "simple", value = metrics) {
 afterEach(cleanup);
 
 describe("ModelQualityPage", () => {
+  it("switches between the business and expert views locally", async () => {
+    const user = userEvent.setup();
+    const { container } = renderPage();
+    const expertButton = screen.getByRole("button", { name: "Экспертный вид" });
+    await user.click(expertButton);
+    expect(expertButton).toHaveAttribute("aria-pressed", "true");
+    expect(container.querySelector(".model-quality-page")).toHaveClass("quality-mode-expert");
+  });
+
   it("uses the same values for simple conclusions and expert metrics", () => {
     const { container } = renderPage();
     const simple = screen.getByLabelText("Простое объяснение качества");
@@ -58,6 +68,8 @@ describe("ModelQualityPage", () => {
     expect(within(matrix).getByLabelText(/Верно найден риск: 10, 83.3%/)).toHaveClass("matrix-cell--tp");
     expect(within(matrix).getByText("Честные клиенты")).toBeInTheDocument();
     expect(within(matrix).getByText("Сигнал тревоги")).toBeInTheDocument();
+    expect(screen.getByLabelText("Вывод по ошибкам модели")).toHaveTextContent("Лишних проверок");
+    expect(screen.getByLabelText("Вывод по ошибкам модели")).toHaveTextContent("Рисков пропущено");
   });
 
   it("explains that scoring remains available without GB_flag", () => {

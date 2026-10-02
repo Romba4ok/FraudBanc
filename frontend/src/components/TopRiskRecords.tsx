@@ -16,8 +16,8 @@ export function TopRiskRecords({
     <section className="overview-card top-risk" aria-labelledby="top-risk-title">
       <div className="overview-card__heading overview-card__heading--inline">
         <div>
-          <p className="eyebrow">Приоритет проверки</p>
           <h2 id="top-risk-title">Самые рискованные записи</h2>
+          <p>Очередь начинается с максимальной вероятности риска.</p>
         </div>
         <button className="overview-link" type="button" onClick={onOpenAll}>
           Открыть все записи <span aria-hidden="true">→</span>

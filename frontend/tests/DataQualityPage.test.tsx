@@ -1,11 +1,13 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { DataQualityPage } from "../src/routes/DataQualityPage";
 
 afterEach(cleanup);
 
 describe("DataQualityPage", () => {
-  it("groups acceptable deviations and explains their impact in Russian", () => {
+  it("groups acceptable deviations and explains their impact in Russian", async () => {
+    const user = userEvent.setup();
     const { container } = render(
       <DataQualityPage
         targetPresent
@@ -26,9 +28,12 @@ describe("DataQualityPage", () => {
     expect(screen.getByText(/отсутствует 20.0% значений/)).toBeInTheDocument();
     expect(screen.getByText("Некорректен")).toBeInTheDocument();
     expect(screen.getByText(/Анализ завершён/)).toBeInTheDocument();
+    expect(screen.getAllByText("Что сделать").length).toBeGreaterThan(0);
     expect(container).not.toHaveTextContent("Unknown categories in");
     expect(container).not.toHaveTextContent("Extra columns will be");
 
+    await user.click(screen.getByRole("button", { name: "Экспертный вид" }));
+    expect(screen.getByRole("button", { name: "Экспертный вид" })).toHaveAttribute("aria-pressed", "true");
     const details = screen.getAllByText("Показать коды и значения");
     fireEvent.click(details[0]);
     expect(screen.getByText("CNT_3D")).toBeInTheDocument();

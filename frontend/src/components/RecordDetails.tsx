@@ -4,6 +4,7 @@ import type { AnalysisRow, TransactionRow } from "../types/analysis";
 import { formatDataWarning, formatFeatureValue, getFeaturePresentation, getRiskLevelLabel } from "../utils/labels";
 import { FactorCard } from "./FactorCard";
 import { InvestigationPanel } from "./InvestigationPanel";
+import { CloseIcon, CopyIcon } from "./ui/icons";
 
 type DetailsTab = "summary" | "factors" | "related" | "source" | "warnings";
 
@@ -24,7 +25,7 @@ function sourceValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "нет данных";
   if (typeof value === "number" || typeof value === "string") return formatFeatureValue(value);
   if (typeof value === "boolean") return value ? "да" : "нет";
-  return JSON.stringify(value);
+  return "Составное значение скрыто";
 }
 
 export function RecordDetails({ row, analysisId, relatedTransactions = [], onClose }: { row: AnalysisRow; analysisId?: string; relatedTransactions?: TransactionRow[]; onClose: () => void }) {
@@ -73,14 +74,14 @@ export function RecordDetails({ row, analysisId, relatedTransactions = [], onClo
     <aside className="record-details" aria-labelledby={`${baseId}-title`}>
       <div className="record-details__heading">
         <div>
-          <p className="eyebrow">Карточка записи</p>
+          <span className="record-details__section">Досье клиента</span>
           <h2 id={`${baseId}-title`} ref={titleRef} tabIndex={-1} title={row.record_id}>{row.record_id}</h2>
           <button className="record-details__copy" type="button" onClick={() => { void copyRecordId(); }}>
-            {copied ? "Скопировано" : "Копировать ID"}
+            <CopyIcon aria-hidden="true" /> {copied ? "Скопировано" : "Копировать ID"}
           </button>
           <span className="sr-only" aria-live="polite">{copied ? `ID ${row.record_id} скопирован` : ""}</span>
         </div>
-        <button className="record-details__close" aria-label="Закрыть карточку записи" type="button" onClick={onClose}>×</button>
+        <button className="record-details__close" aria-label="Закрыть карточку записи" type="button" onClick={onClose}><CloseIcon /></button>
       </div>
 
       <div className="record-details__tabs" role="tablist" aria-label="Разделы карточки записи">
@@ -116,6 +117,19 @@ export function RecordDetails({ row, analysisId, relatedTransactions = [], onClo
               <div><dt>Решение</dt><dd><span className={row.requires_review ? "review review--yes" : "review review--watch"}>{row.requires_review ? "На ручную проверку" : "Наблюдение"}</span></dd></div>
               <div><dt>Факторов в объяснении</dt><dd>{row.explanation_factors.length}</dd></div>
             </dl>
+            {row.explanation_factors.length > 0 && (
+              <div className="record-summary__reasons">
+                <strong>Ключевые причины сигнала</strong>
+                <ul>
+                  {row.explanation_factors.slice(0, 3).map((factor) => (
+                    <li key={factor.feature}>
+                      <span>{getFeaturePresentation(factor.feature).label === factor.feature ? "Дополнительный признак" : getFeaturePresentation(factor.feature).label}</span>
+                      <small>{factor.direction === "increases_risk" ? "повышает риск" : "снижает риск"}</small>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <p>Оценка помогает определить приоритет проверки и не является доказательством мошенничества.</p>
           </div>
         )}
@@ -129,14 +143,21 @@ export function RecordDetails({ row, analysisId, relatedTransactions = [], onClo
 
         {activeTab === "related" && (
           <div className="record-related">
-            <p>Операции, которые модель связала с этим клиентом.</p>
-            {relatedTransactions.length ? <ul>{relatedTransactions.slice(0, 8).map((transaction) => <li key={transaction.record_id}><span><strong>{transaction.transaction_id ?? transaction.record_id}</strong><small>{transaction.transaction_timestamp ?? "Время не определено"}</small></span><strong>{(transaction.risk_probability * 100).toFixed(1)}%</strong></li>)}</ul> : <p className="record-details__empty">Связанные операции в этой выборке не найдены.</p>}
+            <p>Хронология связывает сигнал модели с операциями, доступными в текущей выборке.</p>
+            <ol className="evidence-timeline">
+              <li className="evidence-timeline__signal"><span aria-hidden="true" /><div><strong>Модель сформировала сигнал</strong><small>Оценка риска клиента: {riskPercent.toFixed(1)}%</small></div></li>
+              {relatedTransactions.slice(0, 8).map((transaction) => (
+                <li key={transaction.record_id}><span aria-hidden="true" /><div><strong>{transaction.transaction_id ?? transaction.record_id}</strong><small>{transaction.transaction_timestamp ?? "Время операции не определено"}</small><em>Риск операции {(transaction.risk_probability * 100).toFixed(1)}%</em></div></li>
+              ))}
+            </ol>
+            {!relatedTransactions.length && <p className="record-details__empty">Связанные операции в этой выборке не найдены.</p>}
           </div>
         )}
 
         {activeTab === "source" && (
           <div className="record-source">
-            {sourceEntries.length ? <dl>{sourceEntries.map(([key, value]) => { const feature = getFeaturePresentation(key); const label = feature.label === key ? "Техническое поле" : feature.label; return <div key={key}><dt><span>{label}</span><code>{key}</code></dt><dd>{sourceValue(value)}</dd></div>; })}</dl> : <p className="record-details__empty">Исходные поля записи отсутствуют в ответе.</p>}
+            <p>Значения из исходной записи. Внутренние названия доступны только для дополнительных полей.</p>
+            {sourceEntries.length ? <dl>{sourceEntries.map(([key, value]) => { const feature = getFeaturePresentation(key); const unknown = feature.label === key; const label = unknown ? "Дополнительное поле" : feature.label; return <div key={key}><dt><span>{label}</span>{unknown && <details className="record-source__technical"><summary>Техническое название</summary><code>{key}</code></details>}</dt><dd>{sourceValue(value)}</dd></div>; })}</dl> : <p className="record-details__empty">Исходные поля записи отсутствуют в ответе.</p>}
           </div>
         )}
 
